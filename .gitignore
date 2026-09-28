@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Database & artifacts
+*.db
+*.sqlite
+*.sqlite3
+automaintainer.db
+f:/automaintainer_artifacts/
+automaintainer_artifacts/
+test_artifacts/
+managed_repositories.txt
+
+# Pytest / Test caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+*.pem
