@@ -1,0 +1,28 @@
+{
+  "defaultAction": "SCMP_ACT_ALLOW",
+  "architectures": [
+    "SCMP_ARCH_X86_64",
+    "SCMP_ARCH_X86",
+    "SCMP_ARCH_AARCH64"
+  ],
+  "syscalls": [
+    {
+      "names": [
+        "ptrace",
+        "bpf",
+        "io_uring_setup",
+        "io_uring_enter",
+        "io_uring_register",
+        "kexec_load",
+        "mount",
+        "umount2",
+        "reboot",
+        "swapon",
+        "swapoff"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "args": [],
+      "comment": "AutoMaintainer Kernel Attack Surface Reduction"
+    }
+  ]
+}
