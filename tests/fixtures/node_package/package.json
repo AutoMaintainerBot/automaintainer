@@ -1,0 +1,12 @@
+﻿{
+  "name": "node-sample-app",
+  "version": "1.0.0",
+  "description": "Minimal sample node service",
+  "main": "index.js",
+  "scripts": {
+    "test": "node -e \"console.log('tests pass')\""
+  },
+  "dependencies": {
+    "express": "^4.17.1"
+  }
+}
