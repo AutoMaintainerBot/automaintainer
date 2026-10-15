@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoMaintainer</title>
+    <meta name="description" content="AutoMaintainer watches your repositories for outdated GitHub Actions, broken docs links, and stale dependencies—tests fixes in isolation, and sends clean, small pull requests.">
+    <link rel="canonical" href="https://automaintainer.onrender.com/">
+
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="AutoMaintainer">
+    <meta property="og:description" content="The bot that quietly fixes your stale repos while you sleep. Safe, isolated test runs before every PR.">
+    <meta property="og:url" content="https://automaintainer.onrender.com/">
+    <meta property="og:site_name" content="AutoMaintainer">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav aria-label="Main Navigation">
+        <div class="container nav-inner">
+            <a href="/" class="brand">
+                <div class="brand-icon">AM</div>
+                <span>AutoMaintainer</span>
+            </a>
+            <div class="nav-links">
+                <a href="#fixes" class="nav-link">What it fixes</a>
+                <a href="#how" class="nav-link">How it works</a>
+                <a href="#config" class="nav-link">Configuration</a>
+                <a href="#safety" class="nav-link">Safety</a>
+                <a href="https://github.com/AutoMaintainerBot/automaintainer" target="_blank" rel="noopener" class="nav-link">GitHub ↗</a>
+                <a href="https://github.com/apps/automaintainerbot" target="_blank" rel="noopener" class="btn-nav">Install App ↗</a>
+            </div>
+        </div>
+    </nav>
+
+    <header class="hero container">
+        <h1 class="hero-title">
+            The bot that quietly fixes your stale repos while you sleep.
+        </h1>
+
+        <p class="hero-desc">
+            AutoMaintainer watches your public GitHub repos, finds outdated action hashes, broken docs links, and patch bumps, runs your actual test suite in a container, and opens one small, reviewable PR. No spam, no hallucinated rewrites.
+        </p>
+
+        <div class="hero-ctas">
+            <a href="https://github.com/apps/automaintainerbot" target="_blank" rel="noopener" class="btn btn-primary">
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                Install GitHub App ↗
+            </a>
+            <a href="https://github.com/AutoMaintainerBot/automaintainer" target="_blank" rel="noopener" class="btn btn-secondary">
+                View on GitHub ↗
+            </a>
+        </div>
+
+        <div class="hero-app-banner">
+            <span>
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                <strong>Official GitHub App:</strong> Real-time webhook triggers, scoped permissions &amp; automatic maintenance across all your repos.
+            </span>
+            <a href="https://github.com/apps/automaintainerbot" target="_blank" rel="noopener" class="app-banner-link">
+                Install App &rarr;
+            </a>
+        </div>
+
+        <div class="pr-card" id="preview">
+            <div class="pr-header">
+                <div class="pr-header-left">
+                    <span class="pr-state-pill">
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v4.628A2.251 2.251 0 1110.5 11v-4a.5.5 0 00-.5-.5h-1V5h1a2 2 0 002-2V5a1 1 0 01-1-1z"/></svg>
+                        Open
+                    </span>
+                    <span class="pr-title-text" id="prTitleText">fix(ci): pin GitHub Actions to immutable commit hashes #142</span>
+                </div>
+                <div class="pr-meta">
+                    <code>AutoMaintainerBot:pin-actions</code> into <code>main</code>
+                </div>
+            </div>
+
+            <div class="diff-tabs-bar">
+                <button class="diff-tab active" onclick="setDiff('actions', this)">GitHub Actions Pinning</button>
+                <button class="diff-tab" onclick="setDiff('docs', this)">Documentation 404 Links</button>
+                <button class="diff-tab" onclick="setDiff('deps', this)">Dependency Patch</button>
+                <button class="diff-tab" onclick="setDiff('badges', this)">Broken Status Badges</button>
+                <button class="diff-tab" onclick="setDiff('format', this)">Config Alignment</button>
+            </div>
+
+            <div class="diff-body" id="diffCode">
+<span class="diff-line diff-ctx">@@ -18,5 +18,5 @@ jobs:</span>
+<span class="diff-line diff-ctx">     steps:</span>
+<span class="diff-line diff-del">-     - uses: actions/checkout@v3</span>
+<span class="diff-line diff-add">+     - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.2.2</span>
+<span class="diff-line diff-ctx">       with:</span>
+<span class="diff-line diff-ctx">         fetch-depth: 0</span>
+            </div>
+
+            <div class="pr-footer">
+                <span class="pr-check-ok">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>
+                    All existing test suites passed in sandbox before opening this PR
+                </span>
+                <span class="pr-footer-sub">
+                    Small diff • Single-purpose • Reply to comment to request edits
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <main id="main-content">
+        <section id="fixes">
+            <div class="container">
+                <div class="section-header">
+                    <span class="section-tag">Housekeeping</span>
+                    <h2 class="section-title">Stuff you probably haven't touched in six months.</h2>
+                    <p class="section-desc">
+                        The low-stakes maintenance chores that quietly clutter your backlog. Small, single-purpose fixes with zero architectural drama.
+                    </p>
+                </div>
+
+                <div class="bento-grid">
+                    <article class="bento-card bento-card-wide">
+                        <div class="bento-header">
+                            <span class="bento-kicker">Security Invariant</span>
+                            <span class="bento-badge">Zero Supply-Chain Surprises</span>
+                        </div>
+                        <h3 class="bento-title">Action Tag Pinning</h3>
+                        <p class="bento-text">
+                            Tagging mutable branches like <code>@v3</code> in your CI workflows leaves your repository vulnerable if an upstream tag is deleted or hijacked. AutoMaintainer replaces mutable references with immutable 40-character commit hashes, while keeping the human-friendly version in an inline comment.
+                        </p>
+                        <div class="code-box">
+<span class="yaml-comment"># .github/workflows/ci.yml</span>
+- <span class="yaml-field">uses</span>: actions/checkout@<span class="yaml-val">b4ffde65f46336ab88eb53be808477a3936bae11</span> <span class="yaml-comment"># v4.2.2</span>
+- <span class="yaml-field">uses</span>: actions/setup-node@<span class="yaml-val">60edb5dd545a775178f5252478337951c3262258</span> <span class="yaml-comment"># v4.1.0</span>
+                        </div>
+                    </article>
+
+                    <article class="bento-card">
+                        <div class="bento-header">
+                            <span class="bento-kicker">Two-Way Feedback</span>
+                            <span class="bento-badge">Interactive PRs</span>
+                        </div>
+                        <h3 class="bento-title">Talk to the bot in PR comments</h3>
+                        <p class="bento-text">
+                            Don't want to dig through docs to configure exclusions? If a proposed change needs a small tweak, just reply directly to the pull request.
+                        </p>
+                        <div class="pr-comment-thread">
+                            <div class="pr-comment">
+                                <img src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" alt="User avatar" class="comment-avatar">
+                                <div class="comment-bubble">
+                                    <div class="comment-meta">
+                                        <span class="comment-author">maintainer</span>
+                                        <span class="comment-badge">Author</span>
+                                    </div>
+                                    <p class="comment-text">Keep Node 18 in the test matrix for now, please.</p>
+                                </div>
+                            </div>
+                            <div class="pr-comment">
+                                <div class="brand-icon comment-avatar">AM</div>
+                                <div class="comment-bubble">
+                                    <div class="comment-meta">
+                                        <span class="comment-author">AutoMaintainerBot</span>
+                                        <span class="comment-badge comment-badge-bot">Bot</span>
+                                    </div>
+                                    <p class="comment-text">Preserved Node 18 constraint. Re-ran test suite in sandbox (passed). Updated PR commit.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </article>
+
+                    <article class="bento-card">
+                        <div class="bento-header">
+                            <span class="bento-kicker">Link Integrity</span>
+                            <span class="bento-badge bento-badge-warm">404 Prevention</span>
+                        </div>
+                        <h3 class="bento-title">Dead Docs &amp; Broken Badges</h3>
+                        <p class="bento-text">
+                            Crawls markdown documentation, guides, and READMEs. When external docs migrate or old CI badge links break, it verifies the destination endpoint with live HTTP HEAD checks before sending a single-line patch.
+                        </p>
+                        <div class="code-box">
+<span class="diff-line diff-del">- [![Build Status](https://travis-ci.org/org/repo.svg)](https://travis-ci.org/org/repo)</span>
+<span class="diff-line diff-add">+ [![CI](https://github.com/org/repo/actions/workflows/ci.yml/badge.svg)](https://github.com/org/repo/actions)</span>
+                        </div>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section id="how">
+            <div class="container">
+                <div class="section-header">
+                    <span class="section-tag">Pipeline</span>
+                    <h2 class="section-title">From detection to verified pull request.</h2>
+                    <p class="section-desc">
+                        We built this with one non-negotiable rule: if a bot breaks master, it gets uninstalled.
+                    </p>
+                </div>
+
+                <div class="workflow-split">
+                    <div class="timeline-track">
+                        <div class="timeline-step">
+                            <div class="timeline-num">01</div>
+                            <div class="timeline-content">
+                                <h3 class="timeline-heading">Finds low-hanging chores</h3>
+                                <p class="timeline-body">
+                                    Checks your repository tree for outdated action tags, dead documentation links, or patch-level dependency updates. If everything is fresh, it stays completely silent.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="timeline-step">
+                            <div class="timeline-num">02</div>
+                            <div class="timeline-content">
+                                <h3 class="timeline-heading">Runs your test suite in an isolated sandbox</h3>
+                                <p class="timeline-body">
+                                    Before opening a PR, it checks out your code and executes your repository's existing test command. If anything fails, the change is thrown in the trash immediately.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="timeline-step">
+                            <div class="timeline-num">03</div>
+                            <div class="timeline-content">
+                                <h3 class="timeline-heading">Sends a small, single-purpose PR</h3>
+                                <p class="timeline-body">
+                                    You receive a clean, focused pull request with a concise explanation. Merge it in 1 click—or reply to the PR to ask the bot for adjustments.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="terminal-frame">
+                        <div class="terminal-topbar">
+                            <span class="terminal-dot dot-red"></span>
+                            <span class="terminal-dot dot-yellow"></span>
+                            <span class="terminal-dot dot-green"></span>
+                            <span class="terminal-topbar-title">automaintainer-sandbox-verify</span>
+                        </div>
+                        <div class="terminal-content">
+<span class="term-dim">$</span> <span class="term-cmd">automaintainer verify --repo owner/repo</span>
+<span class="term-dim">[14:20:01]</span> Fetching workflow AST (.github/workflows/ci.yml)...
+<span class="term-dim">[14:20:02]</span> Found 2 mutable tags: @v3, @v2
+<span class="term-dim">[14:20:03]</span> Resolving upstream commit SHAs via GitHub API...
+<span class="term-ok">✓</span> actions/checkout: b4ffde65f46336ab88eb53be808477a3936bae11
+<span class="term-ok">✓</span> actions/setup-node: 60edb5dd545a775178f5252478337951c3262258
+<span class="term-dim">[14:20:04]</span> Spawning isolated container (sandbox-8821)...
+<span class="term-dim">[14:20:06]</span> Running test command: npm test
+<span class="term-ok">✓</span> 16 tests passed (0 failures) in 3.12s
+<span class="term-dim">[14:20:08]</span> Zero diff outside pinned SHAs.
+<span class="term-ok">→ Pull request opened:</span> fix(ci): pin GitHub Actions #142
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="config">
+            <div class="container">
+                <div class="section-header">
+                    <span class="section-tag">Configuration</span>
+                    <h2 class="section-title">Don't want dependency PRs? Turn them off in 2 lines.</h2>
+                    <p class="section-desc">
+                        AutoMaintainer needs zero configuration by default. But if you have opinions or use Renovate for packages, drop an optional <code>.automaintainer.yml</code> in your repository root.
+                    </p>
+                </div>
+
+                <div class="config-split">
+                    <div class="config-card">
+                        <div class="config-card-header">
+                            <span>.automaintainer.yml</span>
+                            <span class="config-card-tag">repo root</span>
+                        </div>
+                        <pre class="config-card-body"><code><span class="yaml-comment"># Optional configuration in your repository root</span>
+<span class="yaml-key">version</span>: <span class="yaml-val">1</span>
+
+<span class="yaml-key">chores</span>:
+  <span class="yaml-field">actions_pinning</span>: <span class="yaml-bool">true</span>     <span class="yaml-comment"># Pin mutable @v3 tags to commit hashes</span>
+  <span class="yaml-field">broken_links</span>: <span class="yaml-bool">true</span>        <span class="yaml-comment"># Crawl markdown files for 404 links</span>
+  <span class="yaml-field">dependency_bumps</span>: <span class="yaml-bool">false</span>   <span class="yaml-comment"># Disable package updates (for example, if using Renovate)</span>
+  <span class="yaml-field">status_badges</span>: <span class="yaml-bool">true</span>       <span class="yaml-comment"># Repair broken CI badges in README</span>
+  <span class="yaml-field">formatter_sync</span>: <span class="yaml-bool">true</span>      <span class="yaml-comment"># Keep .editorconfig &amp; prettier configs in sync</span>
+
+<span class="yaml-key">ignore_paths</span>:
+  - <span class="yaml-str">"docs/archive/**"</span>
+  - <span class="yaml-str">"legacy/**"</span>
+  - <span class="yaml-str">"vendor/**"</span></code></pre>
+                    </div>
+
+                    <div class="config-opt-list">
+                        <div class="config-opt">
+                            <div class="config-opt-bullet">✓</div>
+                            <div>
+                                <div class="config-opt-title">Per-chore opt-in &amp; opt-out</div>
+                                <div class="config-opt-text">
+                                    Don't want dependency pull requests? Disable them with a single boolean flag while keeping action pinning and docs link fixes active.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="config-opt">
+                            <div class="config-opt-bullet">✓</div>
+                            <div>
+                                <div class="config-opt-title">Path globs &amp; ignore rules</div>
+                                <div class="config-opt-text">
+                                    Exclude legacy directories, vendored libraries, or generated documentation so the scanner never touches them.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="config-opt">
+                            <div class="config-opt-bullet">✓</div>
+                            <div>
+                                <div class="config-opt-title">Zero setup required by default</div>
+                                <div class="config-opt-text">
+                                    No config file? AutoMaintainer automatically uses safe, standard defaults. You only need to add <code>.automaintainer.yml</code> when you want custom overrides.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="safety">
+            <div class="container">
+                <div class="section-header">
+                    <span class="section-tag">Safety Invariants</span>
+                    <h2 class="section-title">Ground rules (because noisy bots are the worst).</h2>
+                    <p class="section-desc">
+                        We designed AutoMaintainer under the assumption that noisy bots get uninstalled. Here are the ground rules it follows:
+                    </p>
+                </div>
+
+                <div class="safety-grid">
+                    <article class="safety-card">
+                        <div>
+                            <div class="safety-card-header">
+                                <span class="safety-card-kicker"><span aria-hidden="true">🎯</span> Scope Constraint</span>
+                                <span class="safety-card-badge">Strict Diff Limit</span>
+                            </div>
+                            <h3 class="safety-card-title">Small, single-purpose diffs</h3>
+                            <p class="safety-card-desc">
+                                Every PR is small and focused on one specific chore. It will never do sweeping refactors, touch unrelated files, or reformat your code.
+                            </p>
+                        </div>
+                        <div class="safety-visual-box">
+                            <div class="safety-stat-row">
+                                <span>Target boundary:</span>
+                                <span class="safety-tag-code">1 file (.github/workflows/ci.yml)</span>
+                            </div>
+                            <div class="safety-stat-row">
+                                <span>Diff footprint:</span>
+                                <span class="safety-state-tag safety-state-ok">+2 / -2 lines</span>
+                            </div>
+                            <div class="safety-stat-row">
+                                <span>Collateral edits:</span>
+                                <span class="safety-state-tag safety-state-blocked">0 (AST locked)</span>
+                            </div>
+                        </div>
+                    </article>
+
+                    <article class="safety-card">
+                        <div>
+                            <div class="safety-card-header">
+                                <span class="safety-card-kicker"><span aria-hidden="true">🛡️</span> Path Quarantine</span>
+                                <span class="safety-card-badge safety-card-badge-danger">Hard Safety Stop</span>
+                            </div>
+                            <h3 class="safety-card-title">Secrets and deploy files are off-limits</h3>
+                            <p class="safety-card-desc">
+                                Files like <code>.env</code>, credentials, production deployment manifests, and database migrations are permanently ignored.
+                            </p>
+                        </div>
+                        <div class="safety-visual-box">
+                            <div class="safety-stat-row">
+                                <span>.env* / credentials.json</span>
+                                <span class="safety-state-tag safety-state-blocked">Permanently blocked</span>
+                            </div>
+                            <div class="safety-stat-row">
+                                <span>k8s/ / terraform/ / deploy/</span>
+                                <span class="safety-state-tag safety-state-blocked">Hard ignored</span>
+                            </div>
+                            <div class="safety-stat-row">
+                                <span>migrations/ / alembic/</span>
+                                <span class="safety-state-tag safety-state-blocked">Hard ignored</span>
+                            </div>
+                        </div>
+                    </article>
+
+                    <article class="safety-card">
+                        <div>
+                            <div class="safety-card-header">
+                                <span class="safety-card-kicker"><span aria-hidden="true">🚫</span> Rate Governor</span>
+                                <span class="safety-card-badge safety-card-badge-amber">Max 1 Active PR</span>
+                            </div>
+                            <h3 class="safety-card-title">Strict anti-spam limits</h3>
+                            <p class="safety-card-desc">
+                                AutoMaintainer will never open more than 1 active pull request per repository. If you close a PR without merging, it backs off for 30 days.
+                            </p>
+                        </div>
+                        <div class="safety-visual-box">
+                            <div class="safety-stat-row">
+                                <span>Active PR cap:</span>
+                                <span class="safety-state-tag safety-state-ok">1 open PR maximum</span>
+                            </div>
+                            <div class="safety-stat-row">
+                                <span>Unmerged close penalty:</span>
+                                <span class="safety-tag-code">30-day repo cooldown</span>
+                            </div>
+                            <div class="safety-stat-row">
+                                <span>Unsolicited pinging:</span>
+                                <span class="safety-state-tag safety-state-ok">Zero spam guaranteed</span>
+                            </div>
+                        </div>
+                    </article>
+
+                    <article class="safety-card">
+                        <div>
+                            <div class="safety-card-header">
+                                <span class="safety-card-kicker"><span aria-hidden="true">💬</span> Direct Dialogue</span>
+                                <span class="safety-card-badge">Interactive PRs</span>
+                            </div>
+                            <h3 class="safety-card-title">Understands maintainer feedback</h3>
+                            <p class="safety-card-desc">
+                                You can reply directly to any AutoMaintainer PR (such as <em>"please keep Node 18 for now"</em>), and the bot will update the branch accordingly.
+                            </p>
+                        </div>
+                        <div class="safety-visual-box">
+                            <div class="safety-stat-row">
+                                <span>Maintainer reply:</span>
+                                <span class="safety-tag-code">"keep Node 18 for now"</span>
+                            </div>
+                            <div class="safety-stat-row">
+                                <span>Bot response:</span>
+                                <span class="safety-state-tag safety-state-ok">Branch updated in 8s</span>
+                            </div>
+                            <div class="safety-stat-row">
+                                <span>Container test check:</span>
+                                <span class="safety-state-tag safety-state-ok">Passed (16/16)</span>
+                            </div>
+                        </div>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section id="onboard">
+            <div class="container">
+                <div class="section-header">
+                    <span class="section-tag">Interactive Sandbox</span>
+                    <h2 class="section-title">Audit your repo or add it in one click.</h2>
+                    <p class="section-desc">
+                        Enter any public GitHub repository. Run a simulated Dry-Run to see exactly what chores need fixing and preview the diff before registering.
+                    </p>
+                </div>
+
+                <div class="onboard-box">
+                    <div class="app-recommend-card">
+                        <div>
+                            <div class="app-rec-badge">Recommended for Teams &amp; Repositories</div>
+                            <h3 class="app-rec-title">Install the Official GitHub App</h3>
+                            <p class="app-rec-desc">
+                                Automate maintenance across your entire organization or selected repositories. Receives real-time webhook events, runs automated test verification, and manages PR updates.
+                            </p>
+                        </div>
+                        <a href="https://github.com/apps/automaintainerbot" target="_blank" rel="noopener" class="btn btn-primary btn-nowrap">
+                            <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                            Install GitHub App ↗
+                        </a>
+                    </div>
+
+                    <div class="onboard-split">
+                        <div>
+                            <label class="form-label" for="repoInput">GitHub Repository</label>
+                            <div class="form-row">
+                                <input type="text" id="repoInput" class="form-input" placeholder="octocat/Hello-World" autocomplete="off" spellcheck="false">
+                            </div>
+                            <div class="form-actions">
+                                <button class="btn btn-primary" id="btnDryRun" onclick="runDryRun()">
+                                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M11.536 3.464a5 5 0 010 7.072L8 14.07l-3.536-3.535a5 5 0 017.072-7.072zM8 9a2 2 0 100-4 2 2 0 000 4z"/></svg>
+                                    Run Dry-Run Audit
+                                </button>
+                                <button class="btn btn-secondary" id="btnRegister" onclick="registerRepo()">
+                                    Add repo directly
+                                </button>
+                            </div>
+
+                            <div class="preview-box" id="prevCard">
+                                <img src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" alt="Repository Owner Avatar" width="32" height="32" loading="lazy" class="prev-avatar" id="prevImg">
+                                <div class="prev-info">
+                                    <div class="prev-name" id="prevName">abhinav00anand/automaintainer-sandbox-test</div>
+                                    <div class="prev-desc" id="prevDesc">Enter a public repository above to preview metadata or run a dry-run audit.</div>
+                                </div>
+                            </div>
+
+                            <div id="alertBox" class="alert-box"></div>
+                        </div>
+
+                        <div class="pr-alternative">
+                            <div>
+                                <div class="alt-title">Prefer Git?</div>
+                                <p class="alt-desc">
+                                    You can also register by submitting a pull request adding your repo to <code>config/managed_repositories.yaml</code>.
+                                </p>
+                                <div class="code-box">- repository: "octocat/Hello-World"
+  priority: "standard"
+  branch: "main"</div>
+                            </div>
+                            <button class="btn btn-secondary btn-full" onclick="copySnippet()">
+                                Copy YAML snippet
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="dryRunContainer" class="dry-run-container is-hidden">
+                        <div class="dry-run-header">
+                            <div class="dry-run-header-left">
+                                <span class="pr-state-pill">
+                                    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>
+                                    Dry-Run Audit Simulated
+                                </span>
+                                <span class="dry-run-repo-title" id="dryRunRepoTitle">owner/repo</span>
+                            </div>
+                            <div class="dry-run-header-meta">
+                                <span id="dryRunStars">★ 0 stars</span>
+                                <span>•</span>
+                                <span id="dryRunBranch">branch: main</span>
+                                <span>•</span>
+                                <span class="dry-run-meta-tag">Simulated dry-run</span>
+                            </div>
+                        </div>
+
+                        <div class="dry-run-kicker">
+                            Detected Chores (<span id="dryRunChoresCount">0</span>)
+                        </div>
+                        <div id="dryRunChoresList" class="dry-run-chores-grid"></div>
+
+                        <div class="dry-run-kicker">
+                            Simulated Diff Preview
+                        </div>
+                        <div class="diff-body diff-preview-box" id="dryRunDiffPreview"></div>
+
+                        <div class="dry-run-action-bar">
+                            <div class="dry-run-action-text">
+                                Happy with the dry-run results? Enroll this repository to receive clean maintenance PRs automatically.
+                            </div>
+                            <button class="btn btn-primary" id="btnConfirmRegister" onclick="confirmRegisterFromDryRun()">
+                                Add this repository
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="faq">
+            <div class="container">
+                <div class="section-header">
+                    <span class="section-tag">FAQ</span>
+                    <h2 class="section-title">Common questions</h2>
+                </div>
+
+                <div class="faq-wrap">
+                    <details class="faq-item">
+                        <summary>How is this different from Dependabot or Renovate?</summary>
+                        <p class="faq-ans">
+                            Dependabot and Renovate exclusively handle package dependencies. AutoMaintainer also immutably pins GitHub Actions to full commit SHAs, repairs dead documentation links, updates broken README status badges, and lets you ask for adjustments directly in pull request comments.
+                        </p>
+                    </details>
+
+                    <details class="faq-item">
+                        <summary>How do I connect AutoMaintainer to my repositories?</summary>
+                        <p class="faq-ans">
+                            The easiest way is to install our official <a href="https://github.com/apps/automaintainerbot" target="_blank" rel="noopener">GitHub App</a> to enable real-time webhook-driven maintenance across individual repositories or entire organizations. For public open-source projects, you can also enroll via our web portal or submit a pull request to <code>config/managed_repositories.yaml</code>.
+                        </p>
+                    </details>
+
+                    <details class="faq-item">
+                        <summary>Does this work with monorepos or multi-language projects?</summary>
+                        <p class="faq-ans">
+                            Yes. AutoMaintainer inspects subfolders for project manifests like <code>package.json</code>, <code>pyproject.toml</code>, <code>Cargo.toml</code>, or <code>go.mod</code>. It runs each affected package's test suite inside an isolated sandbox without touching unrelated directories.
+                        </p>
+                    </details>
+
+                    <details class="faq-item">
+                        <summary>Can I disable specific chores or ignore certain directories?</summary>
+                        <p class="faq-ans">
+                            Yes. Drop a <code>.automaintainer.yml</code> file into your repository root. You can toggle <code>actions_pinning</code>, <code>broken_links</code>, <code>dependency_bumps</code>, <code>status_badges</code>, or <code>formatter_sync</code> independently, and specify <code>ignore_paths</code> globs for folders you want untouched.
+                        </p>
+                    </details>
+
+                    <details class="faq-item">
+                        <summary>How does the Dry-Run audit work?</summary>
+                        <p class="faq-ans">
+                            The Dry-Run performs a read-only inspection using GitHub's public API. It checks workflow files, documentation links, and dependency manifests to find actionable chores and renders a simulated diff without writing any commits or creating forks.
+                        </p>
+                    </details>
+
+                    <details class="faq-item">
+                        <summary>What happens if a proposed fix fails my tests?</summary>
+                        <p class="faq-ans">
+                            No pull request is opened. AutoMaintainer runs your existing test command in an isolated container before opening any PR. If the tests fail, the change is discarded.
+                        </p>
+                    </details>
+
+                    <details class="faq-item">
+                        <summary>Will it spam my repository with notifications?</summary>
+                        <p class="faq-ans">
+                            No. AutoMaintainer never opens more than 1 active PR per repository at any given time. If you close a PR without merging, it enters a 30-day cooldown before suggesting anything else.
+                        </p>
+                    </details>
+
+                    <details class="faq-item">
+                        <summary>Can I request adjustments on a pull request?</summary>
+                        <p class="faq-ans">
+                            Yes. Just leave a comment on the pull request (such as <em>"Please keep Node 18 support"</em>). AutoMaintainer reads maintainer comments, updates the patch, and re-pushes to the PR branch.
+                        </p>
+                    </details>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container footer-inner">
+            <p class="license-note">AutoMaintainer is open source software released under the <a href="https://github.com/AutoMaintainerBot/automaintainer/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>. Free for public open-source repositories.</p>
+            <nav class="footer-links" aria-label="Footer Navigation">
+                <a href="https://github.com/apps/automaintainerbot" target="_blank" rel="noopener">GitHub App</a>
+                <a href="/status">System status</a>
+                <a href="https://github.com/AutoMaintainerBot/automaintainer" target="_blank" rel="noopener">GitHub</a>
+                <a href="#onboard">Add repo</a>
+            </nav>
+        </div>
+    </footer>
+
+    <script src="/static/js/app.js" defer></script>
+</body>
+</html>

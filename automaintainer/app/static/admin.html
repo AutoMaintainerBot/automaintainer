@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoMaintainer | Mission Control</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .state-badge { font-family: monospace; font-size: 0.75rem; letter-spacing: 0.05em; }
+        .terminal-box { font-family: monospace; font-size: 0.75rem; background-color: #0d1117; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <header class="border-b border-gray-800 px-6 py-4 flex justify-between items-center bg-gray-950">
+        <div class="flex items-center space-x-3">
+            <span class="text-2xl">🤖</span>
+            <div>
+                <h1 class="text-lg font-bold tracking-tight text-white">AutoMaintainer Admin</h1>
+                <p class="text-xs text-gray-400">Automated Repository Maintenance Engine</p>
+            </div>
+        </div>
+        <div class="flex items-center space-x-4">
+            <span class="flex h-2 w-2 relative">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+            </span>
+            <span class="text-xs text-green-400 uppercase tracking-widest font-semibold">Engine Active</span>
+            <button id="globalKillBtn" onclick="toggleGlobalKill()" class="px-3 py-1 bg-red-900 hover:bg-red-800 text-red-200 border border-red-700 text-xs rounded font-mono font-semibold transition">
+                GLOBAL KILL SWITCH
+            </button>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-6 py-8">
+        <section class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+            <div class="bg-gray-800 border border-gray-700 p-4 rounded-lg">
+                <p class="text-xs text-gray-400 uppercase tracking-wider">Candidates Scanned</p>
+                <p id="statCandidates" class="text-2xl font-bold text-white mt-1">--</p>
+            </div>
+            <div class="bg-gray-800 border border-gray-700 p-4 rounded-lg">
+                <p class="text-xs text-gray-400 uppercase tracking-wider">Opportunities</p>
+                <p id="statOpportunities" class="text-2xl font-bold text-blue-400 mt-1">--</p>
+            </div>
+            <div class="bg-gray-800 border border-gray-700 p-4 rounded-lg">
+                <p class="text-xs text-gray-400 uppercase tracking-wider">Active Sessions</p>
+                <p id="statSessions" class="text-2xl font-bold text-purple-400 mt-1">--</p>
+            </div>
+            <div class="bg-gray-800 border border-gray-700 p-4 rounded-lg">
+                <p class="text-xs text-gray-400 uppercase tracking-wider">PRs Opened</p>
+                <p id="statPRsOpened" class="text-2xl font-bold text-yellow-400 mt-1">--</p>
+            </div>
+            <div class="bg-gray-800 border border-gray-700 p-4 rounded-lg">
+                <p class="text-xs text-gray-400 uppercase tracking-wider">PRs Merged</p>
+                <p id="statPRsMerged" class="text-2xl font-bold text-green-400 mt-1">--</p>
+            </div>
+        </section>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="lg:col-span-2 bg-gray-800 border border-gray-700 rounded-lg overflow-hidden flex flex-col">
+                <div class="px-6 py-4 border-b border-gray-700 flex justify-between items-center bg-gray-850">
+                    <div class="flex space-x-2">
+                        <button onclick="setTab('active')" id="tabActive" class="px-3 py-1 text-xs font-semibold rounded bg-blue-600 text-white">Active</button>
+                        <button onclick="setTab('review')" id="tabReview" class="px-3 py-1 text-xs font-semibold rounded bg-gray-700 text-gray-300 hover:bg-gray-600">Awaiting Review</button>
+                        <button onclick="setTab('merged')" id="tabMerged" class="px-3 py-1 text-xs font-semibold rounded bg-gray-700 text-gray-300 hover:bg-gray-600">Merged</button>
+                        <button onclick="setTab('blocked')" id="tabBlocked" class="px-3 py-1 text-xs font-semibold rounded bg-gray-700 text-gray-300 hover:bg-gray-600">Blocked</button>
+                    </div>
+                    <button onclick="loadData()" class="text-xs text-gray-400 hover:text-white underline">Refresh</button>
+                </div>
+                <div class="divide-y divide-gray-700 overflow-x-auto flex-1">
+                    <table class="w-full text-left text-sm text-gray-300">
+                        <thead class="bg-gray-900 text-xs text-gray-400 uppercase tracking-wider">
+                            <tr>
+                                <th class="px-4 py-3">Session ID</th>
+                                <th class="px-4 py-3">Repo ID</th>
+                                <th class="px-4 py-3">State</th>
+                                <th class="px-4 py-3">Risk</th>
+                                <th class="px-4 py-3">Score</th>
+                                <th class="px-4 py-3">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sessionsTableBody" class="divide-y divide-gray-700"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="bg-gray-800 border border-gray-700 rounded-lg p-5 flex flex-col justify-between">
+                <div>
+                    <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-200 mb-3 border-b border-gray-700 pb-2">Session Inspector & Live Log</h3>
+                    <div id="inspectorContent" class="text-xs text-gray-400 space-y-2 mb-4">
+                        <p class="italic text-gray-500">Select a session to inspect live state, diff firewall checks, and policy gates.</p>
+                    </div>
+
+                    <div class="mt-2">
+                        <p class="text-xs text-gray-400 uppercase tracking-wider font-semibold mb-1">Live Event Stream (SSE)</p>
+                        <div id="liveStreamLogs" class="terminal-box text-green-400 p-3 rounded h-44 overflow-y-auto border border-gray-700">
+                            <span class="text-gray-500">[Disconnected] Waiting for session selection...</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-6 pt-4 border-t border-gray-700 space-y-2">
+                    <button id="approveBtn" disabled onclick="approveActiveSession()" class="w-full py-2 bg-green-700 hover:bg-green-600 disabled:opacity-30 text-white font-semibold text-xs rounded transition">
+                        APPROVE GATE (AWAITING_POLICY)
+                    </button>
+                    <button id="pauseBtn" disabled onclick="pauseActiveSession()" class="w-full py-2 bg-yellow-700 hover:bg-yellow-600 disabled:opacity-30 text-white font-semibold text-xs rounded transition">
+                        PAUSE EXECUTION
+                    </button>
+                    <button id="cancelBtn" disabled onclick="cancelActiveSession()" class="w-full py-2 bg-red-800 hover:bg-red-700 disabled:opacity-30 text-white font-semibold text-xs rounded transition">
+                        OPERATOR ABORT / CANCEL
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/js/admin.js" defer></script>
+</body>
+</html>
