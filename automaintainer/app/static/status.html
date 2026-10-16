@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Status — AutoMaintainer</title>
+    <meta name="description" content="Live operational health, process uptime, database connectivity, and active repository monitoring telemetry for the AutoMaintainer engine.">
+    <link rel="canonical" href="https://automaintainer.onrender.com/status">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/status.css">
+</head>
+<body>
+    <nav aria-label="Status Navigation">
+        <div class="container nav-inner">
+            <a href="/" class="brand">
+                <div class="brand-icon">AM</div>
+                <span>AutoMaintainer</span>
+            </a>
+            <div class="nav-links">
+                <a href="/" class="nav-link">Home</a>
+                <a href="/#onboard" class="nav-link">Add repo</a>
+                <a href="https://github.com/AutoMaintainerBot/automaintainer" target="_blank" rel="noopener" class="nav-link">GitHub ↗</a>
+                <button type="button" class="btn-refresh" id="btnManualRefresh" onclick="fetchLiveTelemetry()">
+                    <svg id="refreshBtnIcon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                    Refresh
+                </button>
+                <a href="https://github.com/apps/automaintainerbot" target="_blank" rel="noopener" class="btn-nav">Install App ↗</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container">
+        <div id="incidentAlertBanner" class="alert-banner is-hidden" role="alert" aria-live="assertive">
+            <div class="alert-banner-left">
+                <svg class="alert-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.396A1.75 1.75 0 0114.082 15H1.918a1.75 1.75 0 01-1.543-2.557L6.457 1.047zM8 5a.75.75 0 00-.75.75v3.5a.75.75 0 001.5 0v-3.5A.75.75 0 008 5zm0 7a1 1 0 100-2 1 1 0 000 2z"/></svg>
+                <span id="incidentText">Notice: Live service degradation detected.</span>
+            </div>
+            <button type="button" class="alert-dismiss-btn" onclick="dismissIncidentBanner()" title="Dismiss notification" aria-label="Dismiss notification">&times;</button>
+        </div>
+
+        <section class="status-hero">
+            <div id="overallBanner" class="overall-banner status-healthy">
+                <div class="overall-left">
+                    <span class="beacon-dot"></span>
+                    <div>
+                        <div class="overall-title" id="statusTitle">Connecting to live telemetry...</div>
+                        <div class="overall-sub">
+                            <span id="pingLatency">Measuring latency...</span>
+                            <span>•</span>
+                            <span class="refresh-indicator-wrap">
+                                <svg class="refresh-ring-svg" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+                                    <circle class="refresh-ring-bg" cx="8" cy="8" r="6"/>
+                                    <circle class="refresh-ring-fill" id="refreshRingFill" cx="8" cy="8" r="6"/>
+                                </svg>
+                                <span class="refresh-info">Auto-refreshing in <span id="refreshTimer">15</span>s</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                <div id="overallBadge" class="status-badge badge-healthy">OPERATIONAL</div>
+            </div>
+        </section>
+
+        <div class="process-strip">
+            <div class="process-card">
+                <div class="process-label">Process Uptime</div>
+                <div class="process-val process-val-mono" id="uptimeDisplay">0s</div>
+                <div class="process-meta">Live host process duration</div>
+            </div>
+            <div class="process-card">
+                <div class="process-label">Instance Boot Time</div>
+                <div class="process-val-mono val-sm" id="bootTimeDisplay">Syncing...</div>
+                <div class="process-meta" id="envMeta">Environment: checking...</div>
+            </div>
+            <div class="process-card">
+                <div class="process-label">API Gateway</div>
+                <div class="process-val val-success" id="controlPlaneStatus">HTTP 200 OK</div>
+                <div class="process-meta" id="endpointLatency">Control Plane live</div>
+            </div>
+        </div>
+
+        <div class="latency-card">
+            <div class="latency-card-header">
+                <div>
+                    <div class="latency-card-title">API Gateway Roundtrip Latency</div>
+                    <div class="latency-card-desc">Real-time client ping samples recorded across active session.</div>
+                </div>
+                <div class="latency-stats">
+                    <span class="latency-stat-pill" id="statMinLatency">Min: --ms</span>
+                    <span class="latency-stat-pill" id="statAvgLatency">Avg: --ms</span>
+                    <span class="latency-stat-pill" id="statMaxLatency">Max: --ms</span>
+                    <span class="latency-stat-pill latency-stat-current" id="statCurrentLatency">Current: --ms</span>
+                </div>
+            </div>
+            <div class="latency-chart-wrap">
+                <svg id="latencySvg" class="latency-svg" viewBox="0 0 600 90" preserveAspectRatio="none" aria-label="Latency trend graph">
+                    <path id="latencyAreaPath" class="latency-area" d=""/>
+                    <path id="latencyLinePath" class="latency-line" d=""/>
+                    <g id="latencyDotsGroup"></g>
+                </svg>
+                <div class="latency-axis-labels">
+                    <span id="latencyOldestTime">Session start</span>
+                    <span class="latency-poll-badge">Polls every 15s</span>
+                    <span id="latencyLatestTime">Now</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-header">
+            <div class="section-label">Core Subsystems</div>
+        </div>
+        <div class="services-card">
+            <div class="service-row">
+                <div class="service-info">
+                    <div class="service-name">Database Engine (PostgreSQL / SQLite)</div>
+                    <div class="service-meta" id="dbMeta">Live query verification: <code>SELECT 1</code></div>
+                </div>
+                <div id="dbBadge" class="status-badge badge-healthy">CONNECTED</div>
+            </div>
+
+            <div class="service-row">
+                <div class="service-info">
+                    <div class="service-name">Task Priority Queue</div>
+                    <div class="service-meta" id="queueMeta">Partitioned queue coordinator</div>
+                </div>
+                <div id="queueBadge" class="status-badge badge-healthy">OPERATIONAL</div>
+            </div>
+
+            <div class="service-row">
+                <div class="service-info">
+                    <div class="service-name">Container Test Sandbox</div>
+                    <div class="service-meta" id="sandboxMeta">Isolated test execution runtime</div>
+                </div>
+                <div id="sandboxBadge" class="status-badge badge-healthy">READY</div>
+            </div>
+
+            <div class="service-row">
+                <div class="service-info">
+                    <div class="service-name">Inference Model Mesh</div>
+                    <div class="service-meta" id="inferenceMeta">
+                        <span>Multi-provider failover routing</span>
+                    </div>
+                </div>
+                <div id="inferenceBadge" class="status-badge badge-healthy">OPERATIONAL</div>
+            </div>
+        </div>
+
+        <div class="section-header">
+            <div class="section-label">Monitored Repositories Fleet</div>
+            <span class="section-count-badge" id="managedCountBadge">0 registered</span>
+        </div>
+        <div class="fleet-card">
+            <div class="fleet-header">
+                <div>
+                    <div class="fleet-title">Active Monitored Repositories</div>
+                    <div class="fleet-desc">Public open-source repositories verified in <code>config/managed_repositories.yaml</code>.</div>
+                </div>
+            </div>
+            <div class="fleet-list" id="managedReposList">
+                <div class="fleet-item">
+                    <div>
+                        <div class="fleet-repo-name">Loading registered repositories...</div>
+                        <div class="fleet-repo-meta">Querying public registry</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-header">
+            <div class="section-label">Telemetry Diagnostic Detail</div>
+        </div>
+        <div class="diag-grid">
+            <div class="diag-card">
+                <div class="diag-header">
+                    <div class="diag-title-wrap">
+                        <div class="diag-title">Control Plane Health</div>
+                        <div class="diag-endpoint">GET /v1/ops/health</div>
+                    </div>
+                    <span class="status-badge badge-healthy" id="opsHttpCode">200 OK</span>
+                </div>
+                <div class="kv-table">
+                    <div class="kv-row">
+                        <span class="kv-key">Engine Status</span>
+                        <span class="kv-val text-brand" id="diagEngineStatus">Healthy</span>
+                    </div>
+                    <div class="kv-row">
+                        <span class="kv-key">Environment</span>
+                        <span class="kv-val-mono" id="diagEnv">production</span>
+                    </div>
+                    <div class="kv-row">
+                        <span class="kv-key">Database Engine</span>
+                        <span class="kv-val text-brand" id="diagDbStatus">Connected</span>
+                    </div>
+                    <div class="kv-row">
+                        <span class="kv-key">Task Queue</span>
+                        <span class="kv-val text-brand" id="diagQueueStatus">Operational</span>
+                    </div>
+                    <div class="kv-row">
+                        <span class="kv-key">Sandbox Jail</span>
+                        <span class="kv-val text-brand" id="diagSandboxStatus">Active</span>
+                    </div>
+                    <div class="kv-row">
+                        <span class="kv-key">Process Uptime</span>
+                        <span class="kv-val-mono" id="diagUptime">0s</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="diag-card">
+                <div class="diag-header">
+                    <div class="diag-title-wrap">
+                        <div class="diag-title">Inference Gateway Status</div>
+                        <div class="diag-endpoint">GET /v1/ops/inference-status</div>
+                    </div>
+                    <span class="status-badge badge-healthy" id="infHttpCode">200 OK</span>
+                </div>
+                <div class="kv-table">
+                    <div class="kv-row">
+                        <span class="kv-key">Gateway Status</span>
+                        <span class="kv-val text-brand" id="diagInfStatus">Healthy</span>
+                    </div>
+                    <div class="kv-row">
+                        <span class="kv-key">Primary Provider</span>
+                        <div id="diagInfPrimary" class="provider-badge-group">
+                            <span class="provider-badge provider-default">syncing...</span>
+                        </div>
+                    </div>
+                    <div class="kv-row">
+                        <span class="kv-key">Configured Priority</span>
+                        <div id="diagInfPriority" class="provider-badge-group">
+                            <span class="provider-badge provider-default">syncing...</span>
+                        </div>
+                    </div>
+                    <div class="kv-row">
+                        <span class="kv-key">Active Providers</span>
+                        <div id="diagActiveProviders" class="provider-badge-group">
+                            <span class="provider-badge provider-default">syncing...</span>
+                        </div>
+                    </div>
+                    <div class="kv-row">
+                        <span class="kv-key">Key Health</span>
+                        <span class="kv-val text-brand" id="diagKeyHealth">Active</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <details class="raw-drawer">
+            <summary class="raw-summary">
+                <span>View Raw Diagnostic JSON Payloads</span>
+                <span class="raw-summary-hint">Expand ▾</span>
+            </summary>
+            <div class="raw-content">
+                <div class="raw-tab-bar">
+                    <div class="raw-tabs" role="tablist">
+                        <button type="button" class="raw-tab is-active" id="tabHealth" onclick="switchRawTab('health', this)">GET /v1/ops/health</button>
+                        <button type="button" class="raw-tab" id="tabInference" onclick="switchRawTab('inference', this)">GET /v1/ops/inference-status</button>
+                        <button type="button" class="raw-tab" id="tabManaged" onclick="switchRawTab('managed', this)">GET /v1/public/managed-repos</button>
+                    </div>
+                    <button type="button" class="btn-copy-raw" id="btnCopyRaw" onclick="copyActiveJsonPayload()" title="Copy active JSON to clipboard">
+                        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"/></svg>
+                        <span id="btnCopyText">Copy JSON</span>
+                    </button>
+                </div>
+                <div class="raw-panel" id="panelHealth">
+                    <pre class="raw-pre" id="opsJsonBox">Loading system health...</pre>
+                </div>
+                <div class="raw-panel is-hidden" id="panelInference">
+                    <pre class="raw-pre" id="inferenceJsonBox">Loading inference status...</pre>
+                </div>
+                <div class="raw-panel is-hidden" id="panelManaged">
+                    <pre class="raw-pre" id="managedJsonBox">Loading managed repositories...</pre>
+                </div>
+            </div>
+        </details>
+    </main>
+
+    <footer>
+        <div class="container footer-inner">
+            <p>AutoMaintainer is open source software released under the <a href="https://github.com/AutoMaintainerBot/automaintainer/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>.</p>
+            <nav class="footer-links" aria-label="Footer Navigation">
+                <a href="https://github.com/apps/automaintainerbot" target="_blank" rel="noopener">GitHub App</a>
+                <a href="/">Home</a>
+                <a href="https://github.com/AutoMaintainerBot/automaintainer" target="_blank" rel="noopener">GitHub</a>
+                <a href="/#onboard">Add repo</a>
+            </nav>
+        </div>
+    </footer>
+
+    <script src="/static/js/status.js" defer></script>
+</body>
+</html>
