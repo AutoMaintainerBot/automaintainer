@@ -83,11 +83,13 @@ class GitHubGitDataClient:
         self.token = token
 
     def _headers(self) -> Dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self.token}",
+        headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28"
         }
+        if self.token and str(self.token).strip():
+            headers["Authorization"] = f"Bearer {str(self.token).strip()}"
+        return headers
 
     def capture_rate_limit_headers(self, headers: Any) -> Dict[str, Any]:
         """Parses rate-limit headers from GitHub responses safely."""

@@ -111,18 +111,7 @@ def parse_managed_repos_file(file_path: str) -> List[str]:
                 parent_dir = os.path.dirname(file_path)
                 if parent_dir:
                     os.makedirs(parent_dir, exist_ok=True)
-                starter_content = (
-                    "# ==============================================================================\n"
-                    "# AutoMaintainer - Managed Repositories Registry\n"
-                    "# ==============================================================================\n"
-                    "# Repositories listed here are autonomously monitored and maintained.\n"
-                    "# The background engine watches this file and triggers scans every 20 seconds.\n"
-                    "# ==============================================================================\n\n"
-                    "version: \"1.0\"\n\n"
-                    "repositories:\n"
-                    "  # - owner/repository\n"
-                    "  # - https://github.com/owner/repository\n"
-                )
+                starter_content = "version: \"1.0\"\n\nrepositories:\n  # - owner/repository\n"
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(starter_content)
                 logger.info(f"Created template managed repositories file at '{file_path}'")
@@ -362,11 +351,16 @@ class ManagedRepoService:
                 logger.info(f"Installation lookup for {full_name} status: {inst_resp.status_code}")
                 if inst_resp.status_code == 200:
                     inst_id = inst_resp.json().get("id")
-                    discovered_inst_id = inst_id
-                    token_to_use = await broker.get_installation_token(inst_id)
-                    logger.info(f"Minted token for managed repo {full_name} (token prefix: {token_to_use[:15]}...)")
+                    try:
+                        token_to_use = await broker.get_installation_token(inst_id)
+                        discovered_inst_id = inst_id
+                        logger.info(f"Minted token for managed repo {full_name}")
+                    except Exception as tok_err:
+                        logger.warning(f"Could not mint installation token for {full_name} ({inst_id}): {tok_err}. Falling back to GITHUB_TOKEN.")
+                        token_to_use = None
+                        discovered_inst_id = None
                 elif inst_resp.status_code == 404:
-                    logger.info(f"GitHub App is not installed on '{full_name}'. Falling back to GITHUB_TOKEN for public/fork maintenance.")
+                    logger.info(f"GitHub App is not installed on '{full_name}'. Falling back to GITHUB_TOKEN.")
             except Exception as e:
                 logger.debug(f"Could not mint installation token for {full_name}: {e}")
 

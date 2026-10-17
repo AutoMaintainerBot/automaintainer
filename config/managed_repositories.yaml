@@ -1,26 +1,3 @@
-# ==============================================================================
-# AutoMaintainer - Managed Repositories Registry
-# ==============================================================================
-# Repositories listed here are autonomously monitored and maintained.
-# The background engine watches this file and triggers scans every 20 seconds.
-#
-# Supported formats:
-#
-# 1. Simple string list:
-# repositories:
-#   - owner/repository
-#   - https://github.com/owner/repository
-#
-# 2. Detailed configuration:
-# repositories:
-#   - name: owner/repository
-#     branch: main
-#     enabled: true
-#     tasks:
-#       - github_action_update
-#       - docs_link_fix
-# ==============================================================================
-
 version: "1.0"
 
 repositories:

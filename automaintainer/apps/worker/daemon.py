@@ -1179,11 +1179,26 @@ class WorkerDaemon:
                     if not github_token:
                         github_token = settings.GITHUB_TOKEN or ""
 
-                    # Fork Pipeline Integration:
-                    # If this repo does NOT have an active GitHub App installation, route mutations via PublicForkManager!
+                    if not github_token:
+                        logger.error(f"Cannot publish mutation for {session_id}: no valid GitHub authentication token available.")
+                        await orchestrator.transition(
+                            session_id,
+                            SessionState.SAFETY_STOP,
+                            actor=self.worker_id,
+                            reason="No valid GitHub authentication token available for mutation publication"
+                        )
+                        return
+
                     target_repo_for_commit = repo_full_name
                     head_fork_owner = None
-                    if not inst_id and github_token:
+                    is_managed_repo = False
+                    try:
+                        from automaintainer.discovery.managed_repos import is_repo_managed
+                        is_managed_repo = is_repo_managed(repo_full_name) or getattr(session_rec, "mode", "") == "managed"
+                    except Exception:
+                        pass
+
+                    if not is_managed_repo and not inst_id and github_token:
                         from automaintainer.github.fork_manager import PublicForkManager
                         fork_mgr = PublicForkManager(
                             token=github_token,
