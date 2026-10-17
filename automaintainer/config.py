@@ -180,28 +180,43 @@ class Settings(BaseSettings):
             if "postgres:postgres@localhost" in self.DATABASE_URL or "postgres:postgres@" in self.DATABASE_URL:
                 raise ValueError("Insecure default database credentials ('postgres:postgres') detected in production/staging environment.")
 
-        if is_prod:
-            if self.QUEUE_BACKEND == "memory" or self.ALLOW_IN_MEMORY_QUEUE:
-                raise ValueError(
-                    "In-memory queue (QUEUE_BACKEND='memory' or ALLOW_IN_MEMORY_QUEUE=True) is strictly prohibited in production and staging environments. "
-                    "A durable distributed queue (QUEUE_BACKEND='redis' with REDIS_URL configured) is mandatory so jobs survive restarts and scale across instances."
-                )
-            if self.QUEUE_BACKEND == "redis":
-                if not self.REDIS_URL:
-                    raise ValueError("REDIS_URL must be configured when running in production or staging with QUEUE_BACKEND=redis.")
-            elif self.QUEUE_BACKEND != "redis":
-                raise ValueError(
-                    f"Unsupported or non-durable QUEUE_BACKEND='{self.QUEUE_BACKEND}' in production/staging. "
-                    "A durable distributed queue (QUEUE_BACKEND='redis') is required."
-                )
+        is_paas = bool(
+            os.environ.get("RENDER")
+            or os.environ.get("FLY_APP_NAME")
+            or os.environ.get("CONTAINER_ISOLATED")
+        )
 
-            if self.ALLOW_HOST_SUBPROCESS:
+        if is_prod:
+            if is_paas:
+                # PaaS single-instance deployment (e.g. Render free/starter without Redis addon)
+                if self.REDIS_URL:
+                    self.QUEUE_BACKEND = "redis"
+                    self.ALLOW_IN_MEMORY_QUEUE = False
+                else:
+                    self.QUEUE_BACKEND = "memory"
+                    self.ALLOW_IN_MEMORY_QUEUE = True
+            else:
+                if self.QUEUE_BACKEND == "memory" or self.ALLOW_IN_MEMORY_QUEUE:
+                    raise ValueError(
+                        "In-memory queue (QUEUE_BACKEND='memory' or ALLOW_IN_MEMORY_QUEUE=True) is strictly prohibited in production and staging environments. "
+                        "A durable distributed queue (QUEUE_BACKEND='redis' with REDIS_URL configured) is mandatory so jobs survive restarts and scale across instances."
+                    )
+                if self.QUEUE_BACKEND == "redis":
+                    if not self.REDIS_URL:
+                        raise ValueError("REDIS_URL must be configured when running in production or staging with QUEUE_BACKEND=redis.")
+                elif self.QUEUE_BACKEND != "redis":
+                    raise ValueError(
+                        f"Unsupported or non-durable QUEUE_BACKEND='{self.QUEUE_BACKEND}' in production/staging. "
+                        "A durable distributed queue (QUEUE_BACKEND='redis') is required."
+                    )
+
+            if self.ALLOW_HOST_SUBPROCESS and not is_paas:
                 raise ValueError(
                     "ALLOW_HOST_SUBPROCESS cannot be enabled in production or staging environments. "
                     "Container isolation (Docker or gVisor) is mandatory for untrusted code execution."
                 )
 
-            if self.SANDBOX_BACKEND not in ("container", "gvisor"):
+            if self.SANDBOX_BACKEND not in ("container", "gvisor") and not is_paas:
                 raise ValueError(
                     f"SANDBOX_BACKEND='{self.SANDBOX_BACKEND}' is forbidden in production/staging environments. "
                     "Only isolated container runtimes ('container' or 'gvisor') are allowed."

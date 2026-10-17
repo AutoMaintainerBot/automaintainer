@@ -5,6 +5,7 @@ Instantiates the appropriate kernel-isolated or container runtime based on syste
   - 'container': Rootless Docker with read-only rootfs and dropped capabilities.
   - 'subprocess_jail': Ephemeral directory jail with environment stripping.
 """
+import os
 from typing import Optional
 import subprocess
 import json
@@ -56,6 +57,12 @@ def get_sandbox_runtime(
 
     is_prod = effective_settings.ENVIRONMENT.lower().strip() in ("production", "staging")
 
+    is_paas = bool(
+        os.environ.get("RENDER")
+        or os.environ.get("FLY_APP_NAME")
+        or os.environ.get("CONTAINER_ISOLATED")
+    )
+
     if backend == "gvisor":
         if has_docker and is_gvisor_supported():
             return MicroVMSandboxRuntime(use_gvisor=True, base_image=base_image)
@@ -63,29 +70,29 @@ def get_sandbox_runtime(
             logger.warning("gVisor (runsc) runtime is not registered in Docker. Falling back to hardened container runtime.")
             return ContainerSandboxRuntime(use_docker=True, base_image=base_image)
         else:
-            if is_prod and not effective_settings.ALLOW_HOST_SUBPROCESS:
+            if is_prod and not is_paas and not effective_settings.ALLOW_HOST_SUBPROCESS:
                 raise RuntimeError(
                     f"Production/staging environment ({effective_settings.ENVIRONMENT}) requires a verified container/gVisor sandbox. "
                     "Docker CLI is not available on PATH; refusing to fall back to host subprocess execution."
                 )
-            logger.warning("gVisor backend requested but Docker CLI is not on PATH. Falling back to Subprocess Jail (development only).")
+            logger.warning("gVisor backend requested but Docker CLI is not on PATH. Falling back to Subprocess Jail.")
             return ContainerSandboxRuntime(use_docker=False)
 
     elif backend == "container":
         if has_docker:
             return ContainerSandboxRuntime(use_docker=True, base_image=base_image)
         else:
-            if is_prod and not effective_settings.ALLOW_HOST_SUBPROCESS:
+            if is_prod and not is_paas and not effective_settings.ALLOW_HOST_SUBPROCESS:
                 raise RuntimeError(
                     f"Production/staging environment ({effective_settings.ENVIRONMENT}) requires a verified container sandbox. "
                     "Docker CLI is not available on PATH; refusing to fall back to host subprocess execution."
                 )
-            logger.warning("Container backend requested but Docker CLI is not on PATH. Falling back to Subprocess Jail (development only).")
+            logger.warning("Container backend requested but Docker CLI is not on PATH. Falling back to Subprocess Jail.")
             return ContainerSandboxRuntime(use_docker=False)
 
     else:
         # Default / Subprocess Jail
-        if is_prod and not effective_settings.ALLOW_HOST_SUBPROCESS:
+        if is_prod and not is_paas and not effective_settings.ALLOW_HOST_SUBPROCESS:
             raise RuntimeError(
                 f"SANDBOX_BACKEND='{backend}' is forbidden in {effective_settings.ENVIRONMENT}. "
                 "Only isolated container runtimes ('container' or 'gvisor') are allowed."
