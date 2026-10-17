@@ -166,22 +166,19 @@ class ContainerSandboxRuntime(ISandboxRuntime):
         start_time = time.time()
         settings = get_settings()
 
-        is_cloud_container = bool(
-            os.environ.get("RENDER")
-            or os.environ.get("RENDER_SERVICE_ID")
-            or os.environ.get("RENDER_INSTANCE_ID")
-            or os.environ.get("FLY_APP_NAME")
-            or os.environ.get("KUBERNETES_SERVICE_HOST")
-            or os.environ.get("CONTAINER_ISOLATED")
-            or os.path.exists("/.dockerenv")
-        )
-
-        # Fail closed: Host subprocess execution strictly forbidden in production/staging unless explicitly allowed or running in a PaaS container sandbox
-        if not self.use_docker and settings.ENVIRONMENT in ("production", "staging") and not (settings.ALLOW_HOST_SUBPROCESS or is_cloud_container):
-            raise RuntimeError(
-                f"Host subprocess execution is strictly forbidden in {settings.ENVIRONMENT}. "
-                "A verified container sandbox (Docker/gVisor) must be configured."
-            )
+        # Fail closed: Host subprocess execution strictly forbidden in production/staging environments.
+        # A PaaS container running the main application is NOT an isolated sandbox for executing untrusted repository code.
+        if not self.use_docker and settings.ENVIRONMENT.lower().strip() in ("production", "staging"):
+            if not settings.ALLOW_HOST_SUBPROCESS:
+                raise RuntimeError(
+                    f"Host subprocess execution of untrusted code is strictly forbidden in {settings.ENVIRONMENT}. "
+                    "A verified container sandbox (Docker/gVisor) is mandatory to isolate untrusted repository code."
+                )
+            else:
+                import logging
+                logging.getLogger("automaintainer.sandbox").warning(
+                    "SECURITY WARNING: ALLOW_HOST_SUBPROCESS is active in production. Untrusted repository code is executing on host."
+                )
 
         # Sanitize environment: NEVER pass host credentials to untrusted builds
         sanitized_env = {

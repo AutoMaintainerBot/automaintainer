@@ -4,6 +4,20 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from automaintainer.core.secrets_manager import get_secret_resolver
 
+INSECURE_DEFAULT_JWT_SECRETS = {
+    "automaintainer_default_jwt_secret_min_32_chars_123456",
+    "changeme",
+    "secret",
+    "default_jwt_secret",
+}
+
+INSECURE_DEFAULT_WEBHOOK_SECRETS = {
+    "automaintainer_default_webhook_secret_32_chars!",
+    "secret",
+    "default_webhook_secret",
+    "changeme",
+}
+
 class Settings(BaseSettings):
     """
     Production-grade application configuration.
@@ -59,9 +73,9 @@ class Settings(BaseSettings):
     PUBLIC_DISCOVERY_ENABLED: bool = Field(default=False, description="Enable crawling and autonomous discovery on uninstalled public repositories (default: False)")
     MANAGED_REPOSITORIES_FILE: str = Field(default="config/managed_repositories.yaml", description="Path to file listing repositories explicitly managed by AutoMaintainer")
     MANAGED_REPOSITORIES_POLL_INTERVAL: int = Field(default=20, description="Interval in seconds for scanning the managed repositories file")
-    GITHUB_WEBHOOK_SECRET: str = Field(
-        default="automaintainer_default_webhook_secret_32_chars!",
-        description="High-entropy webhook HMAC secret. REQUIRED in production."
+    GITHUB_WEBHOOK_SECRET: Optional[str] = Field(
+        default=None,
+        description="High-entropy webhook HMAC secret. REQUIRED in production/staging."
     )
     GITHUB_API_BASE_URL: str = "https://api.github.com"
 
@@ -100,9 +114,9 @@ class Settings(BaseSettings):
     GOOGLE_DEFAULT_FAST_MODEL: str = "gemini-3.8-flash"
 
     # Authentication & Secrets
-    JWT_SECRET: str = Field(
-        default="automaintainer_default_jwt_secret_min_32_chars_123456",
-        description="High-entropy HMAC secret for signing JWT tokens"
+    JWT_SECRET: Optional[str] = Field(
+        default=None,
+        description="High-entropy HMAC secret for signing JWT tokens. REQUIRED in production/staging."
     )
     ADMIN_USERNAME: str = Field(default="admin", description="Admin username for protected dashboard and docs")
     ADMIN_PASSWORD: Optional[str] = Field(
@@ -119,28 +133,48 @@ class Settings(BaseSettings):
 
     # Sandbox & Execution Security
     SANDBOX_BACKEND: str = Field(default="container", description="container | subprocess_jail | gvisor")
-    ALLOW_HOST_SUBPROCESS: bool = Field(default=False, description="Allow host subprocess execution instead of container sandbox (forbidden in production)")
+    ALLOW_HOST_SUBPROCESS: bool = Field(default=False, description="Allow host subprocess execution instead of container sandbox (strictly forbidden in production)")
     DOCKER_BASE_IMAGE: str = "python:3.12-slim"
     EGRESS_PROXY_HOST: str = "127.0.0.1"
     EGRESS_PROXY_PORT: int = 8080
 
     @field_validator("GITHUB_WEBHOOK_SECRET")
     @classmethod
-    def validate_webhook_secret(cls, v: Optional[str], info) -> str:
-        if not v or len(v.strip()) < 16:
-            return "automaintainer_default_webhook_secret_32_chars!"
-        return v.strip()
+    def validate_webhook_secret(cls, v: Optional[str], info) -> Optional[str]:
+        if v is None:
+            return None
+        v_clean = v.strip()
+        if not v_clean:
+            return None
+        return v_clean
 
     @model_validator(mode="after")
     def validate_production_hardening(self) -> "Settings":
+        import secrets as _secrets
         env = self.ENVIRONMENT.lower().strip()
         is_prod = env in ("production", "staging")
 
-        if not self.JWT_SECRET:
-            self.JWT_SECRET = "automaintainer_default_jwt_secret_min_32_chars_123456"
-        elif is_prod:
-            if len(self.JWT_SECRET.strip()) < 32:
-                raise ValueError("JWT_SECRET must be at least 32 characters in production/staging environments.")
+        # JWT Secret validation
+        if is_prod:
+            if not self.JWT_SECRET or len(self.JWT_SECRET.strip()) < 32 or self.JWT_SECRET.strip() in INSECURE_DEFAULT_JWT_SECRETS or "default_jwt_secret" in self.JWT_SECRET.lower():
+                raise ValueError(
+                    "JWT_SECRET must be explicitly configured with a secure, high-entropy secret (min 32 characters) "
+                    "in production/staging environments. Insecure or publicly known default secrets are strictly forbidden."
+                )
+        else:
+            if not self.JWT_SECRET or self.JWT_SECRET.strip() in INSECURE_DEFAULT_JWT_SECRETS:
+                self.JWT_SECRET = _secrets.token_urlsafe(32)
+
+        # Webhook Secret validation
+        if is_prod:
+            if not self.GITHUB_WEBHOOK_SECRET or len(self.GITHUB_WEBHOOK_SECRET.strip()) < 16 or self.GITHUB_WEBHOOK_SECRET.strip() in INSECURE_DEFAULT_WEBHOOK_SECRETS or "default_webhook_secret" in self.GITHUB_WEBHOOK_SECRET.lower():
+                raise ValueError(
+                    "GITHUB_WEBHOOK_SECRET must be explicitly configured with a secure, high-entropy secret (min 16 characters) "
+                    "in production/staging environments. Insecure or publicly known default secrets are strictly forbidden."
+                )
+        else:
+            if not self.GITHUB_WEBHOOK_SECRET or self.GITHUB_WEBHOOK_SECRET.strip() in INSECURE_DEFAULT_WEBHOOK_SECRETS:
+                self.GITHUB_WEBHOOK_SECRET = _secrets.token_hex(20)
 
         if is_prod:
             if "postgres:postgres@localhost" in self.DATABASE_URL or "postgres:postgres@" in self.DATABASE_URL:
@@ -156,15 +190,11 @@ class Settings(BaseSettings):
                 # In-memory queue allowed on single-instance / PaaS deployments without Redis
                 self.ALLOW_IN_MEMORY_QUEUE = True
 
-            is_cloud_container = bool(
-                os.environ.get("RENDER")
-                or os.environ.get("FLY_APP_NAME")
-                or os.environ.get("KUBERNETES_SERVICE_HOST")
-                or os.environ.get("CONTAINER_ISOLATED")
-                or os.path.exists("/.dockerenv")
-            )
-            if self.ALLOW_HOST_SUBPROCESS and not is_cloud_container:
-                raise ValueError("ALLOW_HOST_SUBPROCESS cannot be enabled on bare-metal production or staging environments. Container isolation is mandatory.")
+            if self.ALLOW_HOST_SUBPROCESS:
+                raise ValueError(
+                    "ALLOW_HOST_SUBPROCESS cannot be enabled in production or staging environments. "
+                    "Container isolation (Docker or gVisor) is mandatory for untrusted code execution."
+                )
 
             if self.SANDBOX_BACKEND not in ("container", "gvisor"):
                 raise ValueError(

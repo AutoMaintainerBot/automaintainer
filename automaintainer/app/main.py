@@ -92,13 +92,8 @@ async def background_reconciler_loop():
                                 token_rec = await broker.get_token(target_inst_id)
                                 github_token = token_rec.token
                             except Exception as tok_err:
-                                logger.warning(f"Session {session.id}: failed to mint installation token for {repo_full_name}: {tok_err}. Falling back to GITHUB_TOKEN.")
-                                if settings.GITHUB_TOKEN:
-                                    github_token = settings.GITHUB_TOKEN
-                                    repo_rec.installation_id = None
-                                    await db.commit()
-                                else:
-                                    continue
+                                logger.warning(f"Session {session.id}: failed to mint installation token for {repo_full_name}: {tok_err}. Preserving installation binding and failing closed.")
+                                continue
                         else:
                             github_token = settings.GITHUB_TOKEN or ""
 
@@ -225,122 +220,61 @@ async def redirect_register_page():
     return RedirectResponse(url="/#onboard", status_code=307)
 
 @app.get("/diag", include_in_schema=False)
-async def service_diagnostics():
-    import os
+async def service_diagnostics(username: str = Depends(require_admin_credentials)):
+    """
+    Protected diagnostic endpoint for authorized administrators.
+    Strictly read-only; does not expose secret file listings, environment variables, or mutate external GitHub state.
+    """
     from automaintainer.inference.key_pool import get_global_key_pool
+    from automaintainer.discovery.managed_repos import parse_managed_repos_file
+    settings = get_settings()
     pool = get_global_key_pool()
 
-    secret_files = []
-    for sdir in ("/etc/secrets", "/secrets"):
-        if os.path.exists(sdir):
-            try:
-                secret_files.extend(os.listdir(sdir))
-            except Exception:
-                pass
-
-    matching_env_names = [
-        k for k in sorted(os.environ.keys())
-        if any(term in k.upper() for term in ("GROQ", "CEREBRAS", "GOOGLE", "GEMINI", "KEY", "TOKEN", "SECRET", "API"))
-    ]
-
-    anti_spam_status = {}
     managed_repos = []
     try:
-        from automaintainer.discovery.anti_spam import get_anti_spam_manager
-        from automaintainer.discovery.managed_repos import is_repo_managed, parse_managed_repos_file
-        anti_spam = get_anti_spam_manager()
-        test_repo = "abhinav00anand/automaintainer-sandbox-test"
-        can_open_m, reason_m = anti_spam.can_open_pr(test_repo, is_managed=True)
-        can_open_u, reason_u = anti_spam.can_open_pr(test_repo, is_managed=False)
-        managed_repos = parse_managed_repos_file(get_settings().MANAGED_REPOSITORIES_FILE)
-        anti_spam_status = {
-            "test_repo": test_repo,
-            "is_managed": is_repo_managed(test_repo),
-            "can_open_managed": can_open_m,
-            "reason_managed": reason_m,
-            "can_open_unmanaged": can_open_u,
-            "reason_unmanaged": reason_u,
-            "active_prs": {k: list(v) for k, v in anti_spam._active_prs.items()},
-            "rejection_outcomes_count": len(anti_spam._pr_outcomes),
-            "recent_hourly_prs": len([ts for ts in anti_spam._pr_creation_timestamps if ts > time.time() - 3600]),
-        }
-    except Exception as e:
-        anti_spam_status = {"error": str(e)}
+        managed_repos = parse_managed_repos_file(settings.MANAGED_REPOSITORIES_FILE)
+    except Exception:
+        pass
 
-    github_token_diag = {}
-    gh_token = os.environ.get("GITHUB_TOKEN")
-    if gh_token:
+    github_token_configured = bool(settings.GITHUB_TOKEN)
+    github_app_configured = bool(settings.GITHUB_APP_ID and settings.GITHUB_APP_PRIVATE_KEY)
+
+    token_valid = None
+    if settings.GITHUB_TOKEN:
         try:
             import httpx
             async with httpx.AsyncClient() as client:
                 u_resp = await client.get(
-                    "https://api.github.com/user",
+                    f"{settings.GITHUB_API_BASE_URL}/user",
                     headers={
-                        "Authorization": f"Bearer {gh_token}",
+                        "Authorization": f"Bearer {settings.GITHUB_TOKEN}",
                         "Accept": "application/vnd.github+json",
                         "X-GitHub-Api-Version": "2022-11-28",
                     },
                     timeout=5.0
                 )
-                github_token_diag = {
-                    "user_status": u_resp.status_code,
-                    "login": u_resp.json().get("login") if u_resp.status_code == 200 else None,
-                    "scopes": u_resp.headers.get("x-oauth-scopes"),
-                    "accepted_scopes": u_resp.headers.get("x-accepted-oauth-scopes"),
-                }
-                if u_resp.status_code != 200:
-                    github_token_diag["user_error"] = u_resp.text
-
-                r_resp = await client.get(
-                    "https://api.github.com/repos/abhinav00anand/automaintainer-sandbox-test",
-                    headers={
-                        "Authorization": f"Bearer {gh_token}",
-                        "Accept": "application/vnd.github+json",
-                        "X-GitHub-Api-Version": "2022-11-28",
-                    },
-                    timeout=5.0
-                )
-                if r_resp.status_code == 200:
-                    rdata = r_resp.json()
-                    github_token_diag["repo_permissions"] = rdata.get("permissions")
-                else:
-                    github_token_diag["repo_check"] = f"{r_resp.status_code}: {r_resp.text}"
-
-                # Test fork permission against AutoMaintainerBot
-                f_resp = await client.post(
-                    "https://api.github.com/repos/abhinav00anand/automaintainer-sandbox-test/forks",
-                    headers={
-                        "Authorization": f"Bearer {gh_token}",
-                        "Accept": "application/vnd.github+json",
-                        "X-GitHub-Api-Version": "2022-11-28",
-                    },
-                    json={"organization": "AutoMaintainerBot"},
-                    timeout=8.0
-                )
-                try:
-                    github_token_diag["fork_test"] = {"status": f_resp.status_code, "data": f_resp.json()}
-                except Exception:
-                    github_token_diag["fork_test"] = {"status": f_resp.status_code, "text": f_resp.text}
-        except Exception as e:
-            github_token_diag = {"exception": str(e)}
+                token_valid = (u_resp.status_code == 200)
+        except Exception:
+            token_valid = False
 
     return {
-        "matching_env_names": matching_env_names,
-        "secret_files_found": secret_files,
-        "has_groq_env": any(k.upper().startswith("GROQ_API_KEY") for k in os.environ),
-        "has_google_env": any(k.upper().startswith("GOOGLE_API_KEY") or k.upper().startswith("GEMINI_API_KEY") for k in os.environ),
-        "has_cerebras_env": any(k.upper().startswith("CEREBRAS_API_KEY") for k in os.environ),
-        "has_github_app_id": bool(os.environ.get("GITHUB_APP_ID")),
-        "has_github_app_key": bool(os.environ.get("GITHUB_APP_PRIVATE_KEY")),
-        "has_github_token": bool(os.environ.get("GITHUB_TOKEN")),
-        "bot_org": get_settings().GITHUB_BOT_ORG,
-        "github_token_diag": github_token_diag,
-        "available_providers": pool.get_available_providers(),
-        "active_keys_count": len(pool.get_active_keys()),
-        "pool_registered_keys": [{"id": k.key_id, "provider": k.provider, "status": k.status.value} for k in pool._keys.values()],
+        "status": "operational",
+        "service": "automaintainer-diagnostics",
+        "environment": settings.ENVIRONMENT,
+        "uptime_seconds": int(time.time() - SERVER_START_TIME),
+        "admin_user": username,
+        "credentials": {
+            "github_token_configured": github_token_configured,
+            "github_token_valid": token_valid,
+            "github_app_configured": github_app_configured,
+            "bot_org": settings.GITHUB_BOT_ORG,
+        },
+        "inference": {
+            "available_providers": pool.get_available_providers(),
+            "active_keys_count": len(pool.get_active_keys()),
+        },
+        "managed_repositories_count": len(managed_repos),
         "managed_repositories": managed_repos,
-        "anti_spam_status": anti_spam_status,
-        "commit": "v1.3.6_token_fallback_reconcile",
     }
 
 @app.get("/health/live")

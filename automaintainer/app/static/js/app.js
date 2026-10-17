@@ -184,7 +184,7 @@ async function registerRepo() {
         const data = await res.json();
         if (res.ok) {
             alertBox.className = 'alert-box success';
-            alertBox.textContent = `Repository ${repo} registered! AutoMaintainer will inspect it on the next cycle.`;
+            alertBox.textContent = data.message || `Repository ${repo} registered! AutoMaintainer will inspect it on the next cycle.`;
             repoInput.value = '';
         } else {
             alertBox.className = 'alert-box error';

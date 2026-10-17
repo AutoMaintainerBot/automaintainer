@@ -1,5 +1,5 @@
-from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Depends
+from typing import Optional, List, Dict, Any
+from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel, Field, field_validator
 from automaintainer.discovery.anti_spam import get_anti_spam_manager
 from automaintainer.discovery.candidate_crawler import CandidateCrawler
@@ -110,15 +110,24 @@ class RegisterRepositoryRequest(BaseModel):
     repository: str = Field(..., description="Target repository in 'owner/repo' or GitHub URL format", min_length=3, max_length=256)
 
 
+MAX_PENDING_NOMINATIONS = 50
+_pending_nominations: List[Dict[str, Any]] = []
+
 @router.post("/managed-repos/register")
 async def register_managed_repository(
-    req: RegisterRepositoryRequest
+    req: RegisterRepositoryRequest,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    x_github_token: Optional[str] = Header(None, alias="X-GitHub-Token")
 ):
     """
-    POST /v1/public/managed-repos/register - Register an open-source repository for automated maintenance on request.
+    POST /v1/public/managed-repos/register - Register an open-source repository for automated maintenance.
+    - Authorized operators or verified repository maintainers are registered directly into managed_repositories.yaml.
+    - Unauthenticated public submissions are recorded as capped nominations awaiting operator review / GitHub App installation.
     """
     import httpx
+    import jwt
     from automaintainer.discovery.managed_repos import normalize_repo_identifier, add_managed_repository
+    from automaintainer.app.auth import get_jwt_secret, JWT_ALGORITHM, UserRole
 
     normalized = normalize_repo_identifier(req.repository)
     if not normalized:
@@ -139,18 +148,86 @@ async def register_managed_repository(
 
         repo_data = resp.json()
         if repo_data.get("private", False):
-            raise HTTPException(status_code=400, detail=f"Repository '{normalized}' is private. Only public open-source repositories can be registered on request.")
+            raise HTTPException(status_code=400, detail=f"Repository '{normalized}' is private. Only public open-source repositories can be registered.")
         if repo_data.get("archived", False):
             raise HTTPException(status_code=400, detail=f"Repository '{normalized}' is archived on GitHub.")
 
-    added = add_managed_repository(normalized, settings.MANAGED_REPOSITORIES_FILE)
+        # Determine authorization: is caller an authenticated operator or a verified repo maintainer?
+        is_authorized = False
+
+        # 1. Check AutoMaintainer operator JWT
+        if authorization and authorization.startswith("Bearer "):
+            token_str = authorization[len("Bearer "):].strip()
+            try:
+                payload = jwt.decode(token_str, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
+                roles = payload.get("roles", [])
+                if any(r in (UserRole.OPERATOR.value, UserRole.PLATFORM_OPERATOR.value, UserRole.SECURITY_ADMIN.value) for r in roles):
+                    is_authorized = True
+            except Exception:
+                pass
+
+        # 2. Check GitHub maintainer authorization token if supplied
+        gh_user_token = x_github_token or (authorization[len("Bearer "):].strip() if (authorization and (authorization.startswith("Bearer ghp_") or authorization.startswith("Bearer gho_"))) else None)
+        if not is_authorized and gh_user_token:
+            try:
+                auth_check = await client.get(
+                    f"{settings.GITHUB_API_BASE_URL}/repos/{normalized}",
+                    headers={"Authorization": f"Bearer {gh_user_token}", "Accept": "application/vnd.github+json"},
+                    timeout=5.0
+                )
+                if auth_check.status_code == 200:
+                    perms = auth_check.json().get("permissions", {})
+                    if perms.get("admin") or perms.get("push") or perms.get("maintain"):
+                        is_authorized = True
+            except Exception:
+                pass
+
+    if is_authorized:
+        added = add_managed_repository(normalized, settings.MANAGED_REPOSITORIES_FILE)
+        return {
+            "status": "registered" if added else "already_registered",
+            "repository": normalized,
+            "requires_maintainer_approval": False,
+            "stars": repo_data.get("stargazers_count", 0),
+            "default_branch": repo_data.get("default_branch", "main"),
+            "description": repo_data.get("description"),
+            "message": f"Repository '{normalized}' is actively registered in managed_repositories.yaml."
+        }
+
+    # Unauthenticated public caller: Record as pending nomination subject to hard cap
+    global _pending_nominations
+    if len(_pending_nominations) >= MAX_PENDING_NOMINATIONS:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "Pending nominations queue has reached capacity (max 50). "
+                "To enable autonomous maintenance immediately on your repository, install the official GitHub App: "
+                "https://github.com/apps/automaintainerbot"
+            )
+        )
+
+    already_nominated = any(n.get("repository") == normalized for n in _pending_nominations)
+    if not already_nominated:
+        _pending_nominations.append({
+            "repository": normalized,
+            "stars": repo_data.get("stargazers_count", 0),
+            "default_branch": repo_data.get("default_branch", "main"),
+            "nominated_at": repo_data.get("updated_at")
+        })
+
     return {
-        "status": "registered" if added else "already_registered",
+        "status": "nominated",
         "repository": normalized,
+        "requires_maintainer_approval": True,
         "stars": repo_data.get("stargazers_count", 0),
         "default_branch": repo_data.get("default_branch", "main"),
         "description": repo_data.get("description"),
-        "message": f"Repository '{normalized}' is actively registered in managed_repositories.yaml."
+        "message": (
+            f"Repository '{normalized}' was successfully nominated for review. "
+            "To prevent unauthorized bot activity, unverified nominations require operator approval. "
+            "To activate autonomous maintenance immediately, install the official GitHub App: "
+            "https://github.com/apps/automaintainerbot"
+        )
     }
 
 

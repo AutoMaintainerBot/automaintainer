@@ -36,8 +36,18 @@ async def test_sandbox_enforces_execution_timeout():
 
 
 @pytest.mark.asyncio
-async def test_sandbox_paas_container_allowed_in_production(monkeypatch):
-    """Verifies that PaaS cloud containers (Render, K8s) allow sanitized host execution in production."""
+async def test_sandbox_paas_container_fails_closed_in_production(monkeypatch):
+    """Verifies that PaaS cloud containers (Render, K8s) do NOT bypass sandbox requirements in production."""
+    from automaintainer.config import Settings
+    mock_settings = Settings(
+        ENVIRONMENT="production",
+        SANDBOX_BACKEND="container",
+        ALLOW_HOST_SUBPROCESS=False,
+        GITHUB_TOKEN="ghp_test123",
+        JWT_SECRET="production_secure_jwt_secret_999988887777",
+        GITHUB_WEBHOOK_SECRET="test_webhook_secret_min_16_chars_valid",
+    )
+    monkeypatch.setattr("automaintainer.execution.container_runtime.get_settings", lambda: mock_settings)
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("RENDER", "true")
 
@@ -45,10 +55,9 @@ async def test_sandbox_paas_container_allowed_in_production(monkeypatch):
     workspace = await runtime.prepare_workspace(repo_url="https://github.com/example/repo", commit_sha="abc1234")
     try:
         limits = SandboxResourceLimits(wall_clock_timeout_seconds=5)
-        cmd = [sys.executable, "-c", "print('paas_render_success')"]
-        result = await runtime.run_command(workspace, cmd, limits)
-        assert result.exit_code == 0
-        assert "paas_render_success" in result.stdout
+        cmd = [sys.executable, "-c", "print('paas_render_should_fail')"]
+        with pytest.raises(RuntimeError, match="Host subprocess execution of untrusted code is strictly forbidden in production"):
+            await runtime.run_command(workspace, cmd, limits)
     finally:
         await runtime.destroy_workspace(workspace)
 
@@ -62,7 +71,7 @@ async def test_sandbox_bare_metal_production_fails_closed(monkeypatch):
         SANDBOX_BACKEND="container",
         ALLOW_HOST_SUBPROCESS=False,
         GITHUB_TOKEN="ghp_test123",
-        JWT_SECRET="automaintainer_default_jwt_secret_min_32_chars_123456",
+        JWT_SECRET="production_secure_jwt_secret_999988887777",
         GITHUB_WEBHOOK_SECRET="test_webhook_secret_min_16_chars_valid",
     )
     monkeypatch.setattr("automaintainer.execution.container_runtime.get_settings", lambda: mock_settings)
@@ -76,7 +85,7 @@ async def test_sandbox_bare_metal_production_fails_closed(monkeypatch):
     try:
         limits = SandboxResourceLimits(wall_clock_timeout_seconds=5)
         cmd = [sys.executable, "-c", "print('should_fail')"]
-        with pytest.raises(RuntimeError, match="Host subprocess execution is strictly forbidden"):
+        with pytest.raises(RuntimeError, match="Host subprocess execution of untrusted code is strictly forbidden in production"):
             await runtime.run_command(workspace, cmd, limits)
     finally:
         await runtime.destroy_workspace(workspace)

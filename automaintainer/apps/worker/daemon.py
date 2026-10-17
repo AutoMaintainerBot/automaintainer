@@ -332,15 +332,7 @@ class WorkerDaemon:
             tok_rec = await broker.get_token(installation_id)
             github_token = tok_rec.token if tok_rec else ""
         except Exception as e:
-            logger.error(f"Failed to mint installation token for installation {installation_id}: {e}; aborting reconciliation.")
-            if "403" in str(e) or "404" in str(e):
-                inst.status = "deleted"
-                await db.execute(
-                    update(RepositoryRecord)
-                    .where(RepositoryRecord.installation_id == inst.id)
-                    .values(installation_id=None)
-                )
-                await db.commit()
+            logger.error(f"Failed to mint installation token for installation {installation_id}: {e}; preserving bindings and aborting cycle.")
             return
 
         if not github_token:

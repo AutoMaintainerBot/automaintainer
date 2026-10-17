@@ -5,6 +5,7 @@ from fastapi import HTTPException, Security, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
 from pydantic import BaseModel
+from automaintainer.config import get_settings
 
 class UserRole(str, Enum):
     VIEWER = "viewer"
@@ -29,12 +30,15 @@ def is_platform_admin(user: AuthUser) -> bool:
     return any(r in (UserRole.SECURITY_ADMIN, UserRole.PLATFORM_OPERATOR) for r in user.roles)
 
 def get_jwt_secret() -> str:
-    from automaintainer.config import get_settings
+    from automaintainer.config import get_settings, INSECURE_DEFAULT_JWT_SECRETS
     try:
         settings = get_settings()
         secret = getattr(settings, "JWT_SECRET", None)
         if not secret or len(secret.strip()) < 32:
             raise RuntimeError("Fatal: JWT_SECRET is unconfigured or insecure.")
+        if getattr(settings, "ENVIRONMENT", "production").lower().strip() in ("production", "staging"):
+            if secret.strip() in INSECURE_DEFAULT_JWT_SECRETS or "default_jwt_secret" in secret.lower():
+                raise RuntimeError("Fatal: Known insecure default JWT_SECRET detected in production/staging.")
         return secret
     except Exception as e:
         if isinstance(e, RuntimeError):
@@ -88,12 +92,28 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Secur
     token = credentials.credentials
     try:
         payload = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
+        username = payload.get("username", "")
+        extracted_roles = [UserRole(r) for r in payload.get("roles", ["viewer"])]
+
+        # Privilege separation guard: in production/staging, platform admin roles require trusted admin identity
+        from automaintainer.config import get_settings
+        settings = get_settings()
+        if getattr(settings, "ENVIRONMENT", "production").lower().strip() in ("production", "staging"):
+            if any(r in (UserRole.SECURITY_ADMIN, UserRole.PLATFORM_OPERATOR) for r in extracted_roles):
+                if settings.ADMIN_USERNAME and username != settings.ADMIN_USERNAME:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Privileged platform administrative role rejected for untrusted identity."
+                    )
+
         return AuthUser(
             user_id=payload["sub"],
-            username=payload["username"],
-            roles=[UserRole(r) for r in payload.get("roles", ["viewer"])],
+            username=username,
+            roles=extracted_roles,
             account_id=payload.get("account_id", 0)
         )
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(
             status_code=401,

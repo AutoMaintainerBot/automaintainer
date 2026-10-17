@@ -88,6 +88,11 @@ async def handle_github_webhook(
     if sender_type == "Bot" or sender.endswith("[bot]") or "automaintainer" in sender.lower():
         return {"status": "ignored", "reason": f"Self/bot event from {sender}"}
 
+    repo_dict = payload.get("repository") or {}
+    repo_full = repo_dict.get("full_name", "")
+    owner, rname = repo_full.split("/", 1) if "/" in repo_full else ("unknown", "unknown")
+    github_repo_id = repo_dict.get("id")
+
     resolved_session_id = _resolve_session_id(x_github_event or "", payload)
     
     event_id = f"evt_{uuid.uuid4().hex[:12]}"
@@ -95,54 +100,67 @@ async def handle_github_webhook(
     is_redelivery = False
 
     async with db_mgr.get_session() as session:
-        # If not resolved from branch ref, check PullRequestRecord by number
-        if not resolved_session_id:
-            pr_num = None
-            if payload.get("pull_request"):
-                pr_num = payload["pull_request"].get("number")
-            elif payload.get("issue") and payload["issue"].get("pull_request"):
-                pr_num = payload["issue"].get("number")
+        pr_num = None
+        if payload.get("pull_request"):
+            pr_num = payload["pull_request"].get("number")
+        elif payload.get("issue") and payload["issue"].get("pull_request"):
+            pr_num = payload["issue"].get("number")
 
-            if pr_num:
-                stmt = select(PullRequestRecord.session_id).where(PullRequestRecord.number == pr_num)
-                res = await session.execute(stmt)
-                resolved_session_id = res.scalar_one_or_none()
+        # If not resolved from branch ref, check PullRequestRecord by number bound strictly to repository
+        if not resolved_session_id and pr_num and owner != "unknown" and rname != "unknown":
+            stmt = select(PullRequestRecord.session_id).where(
+                PullRequestRecord.number == pr_num,
+                PullRequestRecord.owner == owner,
+                PullRequestRecord.repo == rname
+            )
+            res = await session.execute(stmt)
+            resolved_session_id = res.scalar_one_or_none()
 
-                # If not found in DB, resolve directly from GitHub PR API
-                if not resolved_session_id:
-                    repo_full = payload.get("repository", {}).get("full_name")
-                    inst_id = (payload.get("installation") or {}).get("id")
-                    if repo_full and inst_id:
-                        try:
-                            from automaintainer.github.auth import InstallationTokenBroker
-                            broker = InstallationTokenBroker(settings)
-                            token = await broker.get_installation_token(inst_id)
-                            import httpx
-                            async with httpx.AsyncClient() as gh_client:
-                                pr_resp = await gh_client.get(
-                                    f"{settings.GITHUB_API_BASE_URL}/repos/{repo_full}/pulls/{pr_num}",
-                                    headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
-                                    timeout=10.0
-                                )
-                                if pr_resp.status_code == 200:
-                                    head_ref = pr_resp.json().get("head", {}).get("ref", "")
-                                    if "automaintainer/" in head_ref:
-                                        resolved_session_id = head_ref.split("automaintainer/")[-1].strip()
-                        except Exception as e:
-                            pass
+            # If not found in DB, resolve directly from GitHub PR API
+            if not resolved_session_id:
+                inst_id = (payload.get("installation") or {}).get("id")
+                if repo_full and inst_id:
+                    try:
+                        from automaintainer.github.auth import InstallationTokenBroker
+                        broker = InstallationTokenBroker(settings)
+                        token = await broker.get_installation_token(inst_id)
+                        import httpx
+                        async with httpx.AsyncClient() as gh_client:
+                            pr_resp = await gh_client.get(
+                                f"{settings.GITHUB_API_BASE_URL}/repos/{repo_full}/pulls/{pr_num}",
+                                headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+                                timeout=10.0
+                            )
+                            if pr_resp.status_code == 200:
+                                head_ref = pr_resp.json().get("head", {}).get("ref", "")
+                                if "automaintainer/" in head_ref:
+                                    resolved_session_id = head_ref.split("automaintainer/")[-1].strip()
+                    except Exception:
+                        pass
 
         if resolved_session_id:
             sess_stmt = select(SessionRecord).where(SessionRecord.id == resolved_session_id)
             sess_res = await session.execute(sess_stmt)
             existing_sess = sess_res.scalars().first()
-            if not existing_sess:
-                repo_full = payload.get("repository", {}).get("full_name", "")
-                owner, rname = repo_full.split("/", 1) if "/" in repo_full else ("unknown", "unknown")
-                repo_lookup = select(RepositoryRecord).where(RepositoryRecord.name == rname)
+            if existing_sess:
+                # Anti-spoofing check: ensure existing session belongs to this event's repository
+                repo_check_stmt = select(RepositoryRecord).where(RepositoryRecord.id == existing_sess.repository_id)
+                repo_check_res = await session.execute(repo_check_stmt)
+                existing_repo = repo_check_res.scalars().first()
+                if existing_repo:
+                    if (owner != "unknown" and existing_repo.owner != owner) or (rname != "unknown" and existing_repo.name != rname):
+                        # Cross-repository mismatch detected: reject binding
+                        resolved_session_id = None
+
+            if resolved_session_id and not existing_sess:
+                repo_lookup = select(RepositoryRecord).where(
+                    RepositoryRecord.owner == owner,
+                    RepositoryRecord.name == rname
+                )
                 repo_l_res = await session.execute(repo_lookup)
                 r_rec = repo_l_res.scalars().first()
                 if not r_rec:
-                    github_repo_id = payload.get("repository", {}).get("id") or 999999
+                    repo_id_val = github_repo_id or 999999
                     inst_id = (payload.get("installation") or {}).get("id")
                     inst_db_id = None
                     if inst_id:
@@ -160,7 +178,7 @@ async def handle_github_webhook(
                             await session.flush()
                         inst_db_id = inst_rec.id
                     r_rec = RepositoryRecord(
-                        github_repo_id=github_repo_id,
+                        github_repo_id=repo_id_val,
                         installation_id=inst_db_id,
                         owner=owner,
                         name=rname,
@@ -181,7 +199,11 @@ async def handle_github_webhook(
                 await session.flush()
 
                 if pr_num:
-                    pr_lookup = select(PullRequestRecord).where(PullRequestRecord.number == pr_num)
+                    pr_lookup = select(PullRequestRecord).where(
+                        PullRequestRecord.number == pr_num,
+                        PullRequestRecord.owner == owner,
+                        PullRequestRecord.repo == rname
+                    )
                     pr_l_res = await session.execute(pr_lookup)
                     if not pr_l_res.scalars().first():
                         pr_rec = PullRequestRecord(

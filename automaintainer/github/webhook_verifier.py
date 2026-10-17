@@ -1,6 +1,7 @@
 import hmac
 import hashlib
 from typing import Optional
+from automaintainer.config import get_settings
 
 class WebhookVerificationError(Exception):
     """Raised when webhook signature verification fails."""
@@ -17,6 +18,19 @@ class GitHubWebhookVerifier:
         """
         Verify GitHub signature (format: 'sha256=<hex_digest>')
         """
+        if not secret or len(secret.strip()) < 16:
+            raise WebhookVerificationError("Webhook secret is unconfigured or insecure (must be at least 16 characters).")
+
+        from automaintainer.config import INSECURE_DEFAULT_WEBHOOK_SECRETS
+        try:
+            settings = get_settings()
+            if getattr(settings, "ENVIRONMENT", "production").lower().strip() in ("production", "staging"):
+                if secret.strip() in INSECURE_DEFAULT_WEBHOOK_SECRETS or "default_webhook_secret" in secret.lower():
+                    raise WebhookVerificationError("Insecure default webhook secret is strictly prohibited in production/staging.")
+        except Exception as e:
+            if isinstance(e, WebhookVerificationError):
+                raise
+
         if not signature_header:
             raise WebhookVerificationError("Missing X-Hub-Signature-256 header")
 

@@ -8,5 +8,5 @@ services:
       - key: PYTHON_VERSION
         value: 3.12.8
       - key: ENVIRONMENT
-        value: development
+        value: production
 
