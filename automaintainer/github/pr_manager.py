@@ -135,8 +135,9 @@ class PullRequestManager:
         executor: Optional[GitHubExecutor] = None,
         anti_spam: Optional[AntiSpamManager] = None,
         redis_client: Optional[Any] = None,
+        lease_validator: Optional[Any] = None,
     ):
-        self._gateway = gateway or GitHubMutationGateway()
+        self._gateway = gateway or GitHubMutationGateway(lease_validator=lease_validator)
         self._executor = executor
         self._anti_spam = anti_spam or get_anti_spam_manager()
         self._redis_client = redis_client

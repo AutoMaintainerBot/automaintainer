@@ -9,4 +9,11 @@ services:
         value: 3.12.8
       - key: ENVIRONMENT
         value: production
+      - key: QUEUE_BACKEND
+        value: redis
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: automaintainer-redis
+          property: connectionString
 

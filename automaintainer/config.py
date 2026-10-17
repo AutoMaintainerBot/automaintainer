@@ -181,14 +181,19 @@ class Settings(BaseSettings):
                 raise ValueError("Insecure default database credentials ('postgres:postgres') detected in production/staging environment.")
 
         if is_prod:
+            if self.QUEUE_BACKEND == "memory" or self.ALLOW_IN_MEMORY_QUEUE:
+                raise ValueError(
+                    "In-memory queue (QUEUE_BACKEND='memory' or ALLOW_IN_MEMORY_QUEUE=True) is strictly prohibited in production and staging environments. "
+                    "A durable distributed queue (QUEUE_BACKEND='redis' with REDIS_URL configured) is mandatory so jobs survive restarts and scale across instances."
+                )
             if self.QUEUE_BACKEND == "redis":
                 if not self.REDIS_URL:
                     raise ValueError("REDIS_URL must be configured when running in production or staging with QUEUE_BACKEND=redis.")
-                if self.ALLOW_IN_MEMORY_QUEUE:
-                    raise ValueError("ALLOW_IN_MEMORY_QUEUE cannot be enabled in production or staging environments. Durable queue required.")
-            elif self.QUEUE_BACKEND == "memory":
-                # In-memory queue allowed on single-instance / PaaS deployments without Redis
-                self.ALLOW_IN_MEMORY_QUEUE = True
+            elif self.QUEUE_BACKEND != "redis":
+                raise ValueError(
+                    f"Unsupported or non-durable QUEUE_BACKEND='{self.QUEUE_BACKEND}' in production/staging. "
+                    "A durable distributed queue (QUEUE_BACKEND='redis') is required."
+                )
 
             if self.ALLOW_HOST_SUBPROCESS:
                 raise ValueError(

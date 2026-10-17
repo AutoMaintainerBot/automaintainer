@@ -55,17 +55,22 @@ class GitHubMutationGateway:
                 "ResourceBoundCapability must possess a valid lease_epoch to fence mutations against lock loss"
             )
 
-        if self.lease_validator is not None:
-            res = self.lease_validator(capability.session_id, capability.lease_epoch)
-            if asyncio.iscoroutine(res):
-                is_valid = await res
-            else:
-                is_valid = bool(res)
-            if not is_valid:
-                raise CapabilityDeniedError(
-                    f"Lease epoch fencing failed: lock ownership for session '{capability.session_id}' "
-                    f"does not match active lease epoch '{capability.lease_epoch}'"
-                )
+        if self.lease_validator is None:
+            raise CapabilityDeniedError(
+                "Lease validation failure: GitHubMutationGateway requires an active lease_validator for every mutation. "
+                "Failing closed to prevent mutations without verified active lease epoch."
+            )
+
+        res = self.lease_validator(capability.session_id, capability.lease_epoch)
+        if asyncio.iscoroutine(res):
+            is_valid = await res
+        else:
+            is_valid = bool(res)
+        if not is_valid:
+            raise CapabilityDeniedError(
+                f"Lease epoch fencing failed: lock ownership for session '{capability.session_id}' "
+                f"does not match active lease epoch '{capability.lease_epoch}'"
+            )
 
         CapabilityBroker.authorize_capability(intent, session_state, actor_role, capability=capability)
 

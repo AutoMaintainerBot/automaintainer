@@ -6,6 +6,7 @@ import time
 from typing import List
 from automaintainer.execution.sandbox_interface import ISandboxRuntime, ExecutionResult
 from automaintainer.execution.resource_limits import SandboxResourceLimits
+from automaintainer.execution.network_security import NetworkFirewallEnforcer, SSRFSecurityViolation
 from automaintainer.config import get_settings
 
 class ContainerSandboxRuntime(ISandboxRuntime):
@@ -137,7 +138,7 @@ class ContainerSandboxRuntime(ISandboxRuntime):
         return workspace_dir
 
     def get_container_flags(self, limits: SandboxResourceLimits) -> List[str]:
-        """Returns standard container isolation flags."""
+        """Returns standard container isolation flags with network-layer firewall restrictions."""
         settings = get_settings()
         flags = [
             "--rm",
@@ -150,6 +151,16 @@ class ContainerSandboxRuntime(ISandboxRuntime):
             f"--pids-limit={limits.max_pids}",
             "--security-opt=seccomp=default"
         ]
+        if limits.allow_network_egress:
+            # Firewall-level outbound restrictions at the container/network layer:
+            # 1. Point container DNS to 127.0.0.1 to block direct/alternate external DNS queries (e.g., 8.8.8.8, 1.1.1.1)
+            flags.extend(["--dns", "127.0.0.1"])
+            # 2. Blackhole cloud metadata IP (169.254.169.254) and metadata endpoints
+            flags.extend([
+                "--add-host", "169.254.169.254:127.0.0.1",
+                "--add-host", "metadata.google.internal:127.0.0.1",
+                "--add-host", "metadata.internal:127.0.0.1"
+            ])
         return flags
 
 

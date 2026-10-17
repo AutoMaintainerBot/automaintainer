@@ -36,6 +36,36 @@ class RedisStreamLeasedQueue:
                 # Group might already exist (BUSYGROUP)
                 pass
 
+    DEDUPE_ENQUEUE_LUA = """
+    local dedupe_key = KEYS[1]
+    local stream_key = KEYS[2]
+    local dedupe_val = ARGV[1]
+    local ttl = tonumber(ARGV[2])
+    local job_id = ARGV[3]
+
+    if dedupe_val ~= "" then
+        local exists = redis.call('get', dedupe_key)
+        if exists then
+            return { 0, exists }
+        end
+    end
+
+    local msg_id = redis.call('xadd', stream_key, '*',
+        'job_id', job_id,
+        'session_id', ARGV[4],
+        'task_type', ARGV[5],
+        'payload', ARGV[6],
+        'dedupe_key', dedupe_val,
+        'enqueued_at', ARGV[7]
+    )
+
+    if dedupe_val ~= "" then
+        redis.call('set', dedupe_key, tostring(msg_id), 'EX', ttl)
+    end
+
+    return { 1, tostring(msg_id) }
+    """
+
     def enqueue(
         self,
         queue_name: str,
@@ -46,23 +76,93 @@ class RedisStreamLeasedQueue:
     ) -> Optional[QueuedJob]:
         stream_key = self._stream_key(queue_name)
         job_id = f"{queue_name}_{session_id}_{int(time.time() * 1000)}"
-        fields = {
-            "job_id": job_id,
-            "session_id": session_id,
-            "task_type": task_type,
-            "payload": json.dumps(payload),
-            "dedupe_key": dedupe_key or "",
-            "enqueued_at": str(time.time()),
-        }
-        msg_id = self.redis.xadd(stream_key, fields)
-        msg_id_str = str(msg_id) if isinstance(msg_id, str) else msg_id.decode("utf-8")
+        dedupe_key_str = dedupe_key or ""
+        dedupe_redis_key = f"automaintainer:dedupe:{dedupe_key_str}" if dedupe_key_str else ""
+        enqueued_time = str(time.time())
+        payload_str = json.dumps(payload)
+
+        msg_id_str = None
+
+        if dedupe_key_str:
+            try:
+                # Atomic check-and-enqueue via Lua script
+                eval_res = self.redis.eval(
+                    self.DEDUPE_ENQUEUE_LUA,
+                    2,
+                    dedupe_redis_key,
+                    stream_key,
+                    dedupe_key_str,
+                    86400,
+                    job_id,
+                    session_id,
+                    task_type,
+                    payload_str,
+                    enqueued_time
+                )
+                if eval_res and len(eval_res) >= 2:
+                    code = int(eval_res[0])
+                    val = eval_res[1]
+                    val_str = val.decode("utf-8") if isinstance(val, bytes) else str(val)
+                    if code == 0:
+                        # Atomic deduplication hit: do NOT push duplicate message to stream
+                        logger.info(f"Redis atomic deduplication hit for key '{dedupe_key_str}', existing: {val_str}")
+                        return QueuedJob(
+                            job_id=val_str,
+                            session_id=session_id,
+                            task_type=task_type,
+                            payload=payload,
+                            dedupe_key=dedupe_key,
+                            enqueued_at=time.time(),
+                            status=JobStatus.QUEUED,
+                            attempt=0
+                        )
+                    else:
+                        msg_id_str = val_str
+            except Exception:
+                # Fallback for mock Redis or adapters without eval
+                pass
+
+        if not msg_id_str:
+            if dedupe_key_str:
+                # Fallback atomic SET with NX (set-if-not-exists)
+                acquired = self.redis.set(dedupe_redis_key, job_id, nx=True, ex=86400)
+                if not acquired:
+                    existing = self.redis.get(dedupe_redis_key)
+                    existing_str = existing.decode("utf-8") if isinstance(existing, bytes) else str(existing or "")
+                    logger.info(f"Redis set(nx) deduplication hit for key '{dedupe_key_str}', existing: {existing_str}")
+                    return QueuedJob(
+                        job_id=existing_str or job_id,
+                        session_id=session_id,
+                        task_type=task_type,
+                        payload=payload,
+                        dedupe_key=dedupe_key,
+                        enqueued_at=time.time(),
+                        status=JobStatus.QUEUED,
+                        attempt=0
+                    )
+
+            fields = {
+                "job_id": job_id,
+                "session_id": session_id,
+                "task_type": task_type,
+                "payload": payload_str,
+                "dedupe_key": dedupe_key_str,
+                "enqueued_at": enqueued_time,
+            }
+            msg_id = self.redis.xadd(stream_key, fields)
+            msg_id_str = str(msg_id) if isinstance(msg_id, str) else msg_id.decode("utf-8")
+            if dedupe_key_str:
+                try:
+                    self.redis.set(dedupe_redis_key, msg_id_str, ex=86400)
+                except Exception:
+                    pass
 
         # Initialize authoritative job metadata hash
         meta_key = f"automaintainer:job_meta:{msg_id_str}"
         try:
             self.redis.hset(meta_key, "session_id", session_id)
             self.redis.hset(meta_key, "task_type", task_type)
-            self.redis.hset(meta_key, "payload", json.dumps(payload))
+            self.redis.hset(meta_key, "payload", payload_str)
             self.redis.hset(meta_key, "queue_name", queue_name)
             self.redis.hset(meta_key, "attempt", 0)
             self.redis.expire(meta_key, 86400)

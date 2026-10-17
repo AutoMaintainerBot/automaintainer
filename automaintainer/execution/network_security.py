@@ -1,4 +1,4 @@
-﻿import ipaddress
+import ipaddress
 import socket
 from urllib.parse import urlparse
 from typing import Set, Tuple, Optional
@@ -86,3 +86,90 @@ class ControlledEgressFilter:
         allowed, reason = cls.validate_destination(target_url)
         if not allowed:
             raise SSRFSecurityViolation(f"Controlled Egress Violation: {reason}")
+
+
+from contextlib import contextmanager
+
+
+class NetworkFirewallEnforcer:
+    """
+    Firewall-layer enforcement against proxy bypass, direct sockets,
+    alternate DNS servers, and cloud metadata endpoints.
+    Enforces that all network interactions MUST route through the designated egress proxy.
+    """
+
+    METADATA_HOSTS: Set[str] = {
+        "169.254.169.254",
+        "metadata.google.internal",
+        "metadata.internal",
+        "fd00:ec2::254",
+    }
+
+    @classmethod
+    def validate_outbound_connection(
+        cls,
+        target_host: str,
+        target_port: int,
+        proxy_host: str = "127.0.0.1",
+        proxy_port: int = 8080
+    ) -> Tuple[bool, str]:
+        # 1. Allowed if connecting directly to the authorized egress proxy
+        clean_target = str(target_host).strip().lower()
+        clean_proxy = str(proxy_host).strip().lower()
+        is_proxy = (
+            (clean_target == clean_proxy or clean_target in ("127.0.0.1", "localhost", "host.docker.internal"))
+            and target_port == proxy_port
+        )
+        if is_proxy:
+            return True, "OK: routed via authorized egress proxy"
+
+        # 2. Block direct metadata-service access
+        if clean_target in cls.METADATA_HOSTS or clean_target.startswith("169.254."):
+            return False, f"Firewall blocked direct metadata-service access to '{target_host}:{target_port}'"
+
+        # 3. Block alternate DNS access
+        if target_port == 53:
+            return False, f"Firewall blocked direct alternate DNS query to '{target_host}:53'"
+
+        # 4. Check forbidden networks (RFC1918, loopback, link-local)
+        if ControlledEgressFilter.is_ip_forbidden(target_host):
+            return False, f"Firewall blocked direct connection to forbidden internal/private network '{target_host}:{target_port}'"
+
+        # 5. Direct socket bypass (attempting external connection without proxy)
+        return False, f"Firewall blocked direct socket bypass to external '{target_host}:{target_port}'; all outbound traffic must route through egress proxy"
+
+    @classmethod
+    def enforce_socket(
+        cls,
+        target_host: str,
+        target_port: int,
+        proxy_host: str = "127.0.0.1",
+        proxy_port: int = 8080
+    ) -> None:
+        allowed, reason = cls.validate_outbound_connection(target_host, target_port, proxy_host, proxy_port)
+        if not allowed:
+            raise SSRFSecurityViolation(f"Network Isolation Violation: {reason}")
+
+    @classmethod
+    @contextmanager
+    def socket_firewall_context(cls, proxy_host: str = "127.0.0.1", proxy_port: int = 8080):
+        """
+        Context manager enforcing firewall rules on Python socket connections.
+        Intercepts socket.connect and rejects direct sockets, alternate DNS, and metadata access.
+        """
+        orig_connect = socket.socket.connect
+
+        def _enforcing_connect(sock_self, address):
+            if isinstance(address, tuple) and len(address) >= 2:
+                host, port = address[0], address[1]
+                cls.enforce_socket(str(host), int(port), proxy_host, proxy_port)
+            elif isinstance(address, str):
+                cls.enforce_socket(address, 0, proxy_host, proxy_port)
+            return orig_connect(sock_self, address)
+
+        socket.socket.connect = _enforcing_connect
+        try:
+            yield
+        finally:
+            socket.socket.connect = orig_connect
+
